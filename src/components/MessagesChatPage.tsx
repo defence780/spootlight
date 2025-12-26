@@ -105,17 +105,14 @@ const MessagesChatPage = () => {
       }
 
       // Завантажуємо повідомлення
-      // Показуємо всі повідомлення, де користувач (toChatId) є учасником:
-      // - Від користувача: from = toChatId
-      // - До користувача: to = toChatId
-      let query = supabase
+      // НОВА СТРУКТУРА: user_id, worker_id, message, sender
+      // Показуємо всі повідомлення, де user_id = toChatId
+      const { data, error: fetchError } = await supabase
         .from('messages')
         .select('*')
-        .or(`from.eq.${toChatId},to.eq.${toChatId}`)
-
-      query = query.order('created_at', { ascending: true })
-
-      const { data, error: fetchError } = await query
+        .eq('user_id', toChatId)
+        .order('created_at', { ascending: true })
+        .limit(1000) // Збільшено ліміт для повної історії чату
 
       if (fetchError) {
         console.error('Помилка завантаження повідомлень:', fetchError)
@@ -148,6 +145,58 @@ const MessagesChatPage = () => {
     fetchMessages()
   }, [initialized, toChatId, currentUserRefId])
 
+  // Real-time підписка на нові повідомлення
+  useEffect(() => {
+    if (!initialized || !toChatId) return
+
+    // Функція обробки нового повідомлення
+  const handleNewMessage = (newMessage: any) => {
+    // НОВА СТРУКТУРА: user_id, worker_id, message, sender
+    // Перевіряємо, чи повідомлення стосується поточного чату (user_id = toChatId)
+    if (String(newMessage.user_id) !== String(toChatId)) {
+      return
+    }
+      
+      setMessages((prev) => {
+        // Перевіряємо, чи повідомлення ще не додано
+        const exists = prev.some((msg) => msg.id === newMessage.id)
+        if (exists) return prev
+        // Додаємо нове повідомлення та сортуємо
+        const updated = [...prev, newMessage].sort((a, b) => {
+          const dateA = new Date(a.created_at || 0).getTime()
+          const dateB = new Date(b.created_at || 0).getTime()
+          return dateA - dateB
+        })
+        return updated
+      })
+    }
+
+    // Підписка на нові повідомлення через Supabase Realtime
+    // НОВА СТРУКТУРА: user_id, worker_id, message, sender
+    // Підписуємося тільки на повідомлення, де user_id = toChatId
+    const channel = supabase
+      .channel(`messages:user:${toChatId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+          filter: `user_id=eq.${toChatId}`
+        },
+        (payload) => {
+          console.log('Отримано нове повідомлення через realtime:', payload)
+          handleNewMessage(payload.new as any)
+        }
+      )
+      .subscribe()
+
+    return () => {
+      // Відписка при розмонтуванні компонента
+      supabase.removeChannel(channel)
+    }
+  }, [initialized, toChatId])
+
   // Автоскрол до останнього повідомлення
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -167,11 +216,13 @@ const MessagesChatPage = () => {
     if (!fromId) return
 
     // Оптимістичне оновлення - додаємо повідомлення одразу
+    // НОВА СТРУКТУРА: user_id, worker_id, message, sender
     const optimisticMessage = {
       id: `temp-${Date.now()}`,
-      from: fromId,
-      to: toChatId,
+      user_id: toChatId,
+      worker_id: currentUserRefId ? Number(currentUserRefId) : null,
       message: messageToSend,
+      sender: 'bot',
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     }
@@ -188,11 +239,23 @@ const MessagesChatPage = () => {
         isSuperAdmin
       })
 
+      // Отримуємо інформацію про користувача, якому відправляється повідомлення
+      // щоб використати user.chat_id та user.ref_id
+      const { data: userData } = await supabase
+        .from('users')
+        .select('chat_id, ref_id')
+        .eq('chat_id', toChatId)
+        .single()
+
+      if (!userData) {
+        throw new Error('Користувача не знайдено')
+      }
+
       const { error } = await supabase.functions.invoke('logic', {
         body: {
           type: 'send_message',
-          ref_id: currentUserRefId || (isSuperAdmin ? toChatId : null),  // Для superadmin без ref_id використовуємо toChatId
-          chat_id: toChatId,
+          ref_id: currentUserRefId || (isSuperAdmin ? toChatId : null),  // ref_id відправника (воркера/адміна)
+          chat_id: userData.chat_id,  // user.chat_id - chat_id користувача, якому відправляється
           message: messageToSend
         }
       })
@@ -291,9 +354,13 @@ const MessagesChatPage = () => {
           ) : (
             <div className="messages-chat-messages-list">
               {messages.map((message, index) => {
-                // Зліва: повідомлення, де from === toChatId (від користувача)
-                // Справа: всі інші (від воркера/адміна)
-                const isFromUser = String(message.from) === String(toChatId)
+                // ЛОГІКА ВІДОБРАЖЕННЯ:
+                // НОВА СТРУКТУРА: user_id, worker_id, message, sender
+                // Якщо sender === 'bot' або sender === 'worker' → зліва (від воркера/бот)
+                // Якщо sender === 'user' → справа (від користувача)
+                const isFromWorker = message.sender === 'bot' || message.sender === 'worker'
+                // Повідомлення від воркера/бот показуємо зліва
+                const displayAsFromUser = isFromWorker
                 const prevMessage = index > 0 ? messages[index - 1] : null
                 const showDateSeparator = !prevMessage || 
                   new Date(message.created_at).toDateString() !== new Date(prevMessage.created_at).toDateString()
@@ -309,11 +376,11 @@ const MessagesChatPage = () => {
                         })}
                       </div>
                     )}
-                    <div className={`messages-chat-message ${isFromUser ? 'from-user' : 'from-worker'}`}>
+                    <div className={`messages-chat-message ${displayAsFromUser ? 'from-user' : 'from-worker'}`}>
                       <div className="messages-chat-message-bubble">
                         <div className="messages-chat-message-header">
                           <span className="messages-chat-message-sender">
-                            {isFromUser ? (toUser?.first_name || 'Користувач') : 'Воркер'}
+                            {displayAsFromUser ? 'Воркер' : (toUser?.first_name || 'Користувач')}
                           </span>
                           <span className="messages-chat-message-time">
                             {new Date(message.created_at).toLocaleTimeString('uk-UA', {

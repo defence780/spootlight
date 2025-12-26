@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { X, RotateCcw, RefreshCw, User } from 'lucide-react'
+import { Plus, X, Minus, RotateCcw, RefreshCw, User } from 'lucide-react'
 import './AdminTradingPage.css'
 import { DEFAULT_TRADING_TAB, TRADING_TABS, TradingTabKey } from '../types/trading'
 
@@ -98,6 +98,10 @@ const AdminTradingPage = () => {
   const [error, setError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<TradingTabKey>(DEFAULT_TRADING_TAB)
   const [workers, setWorkers] = useState<Worker[]>([])
+  const [addingWorkerId, setAddingWorkerId] = useState<number | null>(null)
+  const [newUserChatId, setNewUserChatId] = useState<string>('')
+  const [showAddUserModal, setShowAddUserModal] = useState<number | null>(null)
+  const [removingWorkerId, setRemovingWorkerId] = useState<number | null>(null)
   const [withdrawals, setWithdrawals] = useState<any[]>([])
   const [deposits, setDeposits] = useState<any[]>([])
   const [trades, setTrades] = useState<any[]>([])
@@ -481,6 +485,52 @@ const AdminTradingPage = () => {
     }
   }
 
+  const addUserToWorker = async (workerChatId: string | number, userChatId: string) => {
+    if (!userChatId.trim()) {
+      alert('Введіть chat_id користувача')
+      return
+    }
+
+    // Знаходимо worker.id за chat_id для відстеження
+    const worker = workers.find((w) => w.chat_id === workerChatId)
+    if (worker) {
+      setAddingWorkerId(worker.id)
+    }
+    setError(null)
+
+    try {
+      // Перевіряємо, чи існує користувач з таким chat_id
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .select('id, chat_id, ref_id')
+        .eq('chat_id', userChatId.trim())
+        .single()
+
+      if (userError || !userData) {
+        throw new Error('Користувач з таким chat_id не знайдено')
+      }
+
+      // Оновлюємо ref_id користувача на chat_id воркера
+      const { error: updateError } = await supabase
+        .from('users')
+        .update({ ref_id: workerChatId })
+        .eq('chat_id', userChatId.trim())
+
+      if (updateError) throw updateError
+
+      // Оновлюємо список воркерів, щоб оновити кількість користувачів
+      await fetchWorkers()
+
+      setShowAddUserModal(null)
+      setNewUserChatId('')
+      alert('Користувача успішно додано до воркера!')
+    } catch (err: any) {
+      console.error('Ошибка добавления пользователя к воркеру', err)
+      setError(err.message || 'Не удалось добавить пользователя.')
+    } finally {
+      setAddingWorkerId(null)
+    }
+  }
 
   const fetchReports = async (closerChatId: number) => {
     setLoadingReports(true)
@@ -556,6 +606,34 @@ const AdminTradingPage = () => {
     await fetchLeads(closerChatId, status)
   }
 
+  const removeWorker = async (workerId: number, workerChatId: string | number) => {
+    if (!confirm('Ви впевнені, що хочете видалити цього воркера з панелі?')) {
+      return
+    }
+
+    setRemovingWorkerId(workerId)
+    setError(null)
+
+    try {
+      // Оновлюємо worker_comment на null, щоб прибрати воркера з панелі
+      const { error: updateError } = await supabase
+        .from('users')
+        .update({ worker_comment: null })
+        .eq('chat_id', workerChatId)
+
+      if (updateError) throw updateError
+
+      // Оновлюємо список воркерів
+      await fetchWorkers()
+
+      alert('Воркера успішно видалено з панелі!')
+    } catch (err: any) {
+      console.error('Ошибка удаления воркера', err)
+      setError(err.message || 'Не удалось удалить воркера.')
+    } finally {
+      setRemovingWorkerId(null)
+    }
+  }
 
   const fetchWithdrawals = async () => {
     setLoading(true)
@@ -841,87 +919,148 @@ const AdminTradingPage = () => {
     setLoading(true)
     setError(null)
     try {
-      let query = supabase
-        .from('messages')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(100)
+      // ОПТИМІЗОВАНА ЛОГІКА: Спочатку отримуємо користувачів, потім повідомлення
+      
+      // Крок 1: Отримуємо користувачів
+      let usersQuery = supabase
+        .from('users')
+        .select('id, chat_id, first_name, username, ref_id, worker_comment')
 
-      // Якщо є ref_id з spotlights_users, фільтруємо повідомлення
-      // Показуємо тільки ті, де from (ref_id) або to (chat_id) відповідає поточному адміну
-      if (currentUserRefId) {
-        // Отримуємо всіх користувачів з users, у яких ref_id дорівнює currentUserRefId
-        const { data: usersWithRefId } = await supabase
+      if (isSuperAdmin) {
+        // Superadmin бачить всіх користувачів (з лімітом для продуктивності)
+        usersQuery = usersQuery.limit(1000)
+      } else if (currentUserRefId) {
+        // Для воркера/адміна - тільки його користувачі
+        usersQuery = usersQuery.eq('ref_id', currentUserRefId)
+      } else {
+        // Немає доступу
+        setMessages([])
+        setMessagesUserInfo({})
+        setMessagesWorkerInfo({})
+        return
+      }
+
+      const { data: usersData, error: usersError } = await usersQuery
+
+      if (usersError) {
+        console.error('Помилка завантаження користувачів:', usersError)
+        throw usersError
+      }
+
+      if (!usersData || usersData.length === 0) {
+        setMessages([])
+        setMessagesUserInfo({})
+        setMessagesWorkerInfo({})
+        return
+      }
+
+      // Створюємо мапу користувачів та збираємо chat_id
+      const userInfoMap: Record<string | number, any> = {}
+      const workerChatIds = new Set<string | number>()
+      const userChatIds: (string | number)[] = []
+
+      usersData.forEach((user: any) => {
+        if (user.chat_id) {
+          userInfoMap[user.chat_id] = user
+          userChatIds.push(user.chat_id)
+          if (user.ref_id) {
+            workerChatIds.add(user.ref_id)
+          }
+        }
+      })
+
+      // Завантажуємо воркерів одним запитом (якщо потрібно)
+      const workerInfoMap: Record<string | number, any> = {}
+      if (workerChatIds.size > 0) {
+        const { data: workersData, error: workersError } = await supabase
           .from('users')
-          .select('chat_id')
-          .eq('ref_id', currentUserRefId)
+          .select('id, chat_id, first_name, username, worker_comment')
+          .in('chat_id', Array.from(workerChatIds))
 
-        if (usersWithRefId && usersWithRefId.length > 0) {
-          const chatIds = usersWithRefId.map((u) => u.chat_id).filter(Boolean)
-          // Фільтруємо повідомлення, де to (chat_id) входить у список користувачів воркера
-          // або де from (ref_id) дорівнює currentUserRefId
-          // Використовуємо правильний синтаксис Supabase PostgREST
-          const chatIdsStr = chatIds.join(',')
-          query = query.or(`to.in.(${chatIdsStr}),from.eq.${currentUserRefId}`)
-        } else {
-          // Якщо немає користувачів з таким ref_id, фільтруємо тільки по from
-          query = query.eq('from', currentUserRefId)
+        if (workersError) {
+          console.error('Помилка завантаження воркерів:', workersError)
+        } else if (workersData) {
+          workersData.forEach((worker: any) => {
+            workerInfoMap[worker.chat_id] = worker
+          })
         }
       }
 
-      const { data, error: fetchError } = await query
+      // Крок 2: Отримуємо повідомлення для цих користувачів
+      if (userChatIds.length === 0) {
+        setMessages([])
+        setMessagesUserInfo(userInfoMap)
+        setMessagesWorkerInfo(workerInfoMap)
+        return
+      }
 
-      if (fetchError) throw fetchError
-      
-      // Сортуємо повідомлення за датою створення (від старого до нового для чату)
-      const sortedMessages = (data || []).sort((a, b) => {
+      let messagesQuery = supabase
+        .from('messages')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(1000)
+
+      // Фільтруємо повідомлення для цих користувачів
+      // НОВА СТРУКТУРА: user_id, worker_id, message, sender
+      // Фільтруємо по user_id (chat_id користувача)
+      if (isSuperAdmin) {
+        // Для superadmin - всі повідомлення з цими користувачами
+        messagesQuery = messagesQuery.in('user_id', userChatIds)
+      } else if (currentUserRefId) {
+        // Для воркера - повідомлення до його користувачів (user_id = user.chat_id)
+        // Можна також фільтрувати по worker_id, якщо потрібно
+        messagesQuery = messagesQuery.in('user_id', userChatIds)
+      }
+
+      const { data: messagesData, error: messagesError } = await messagesQuery
+
+      if (messagesError) {
+        console.error('Помилка завантаження повідомлень:', messagesError)
+        throw messagesError
+      }
+
+      // Сортуємо повідомлення за датою (від старого до нового для чату)
+      const sortedMessages = (messagesData || []).sort((a: any, b: any) => {
         const dateA = new Date(a.created_at || 0).getTime()
         const dateB = new Date(b.created_at || 0).getTime()
         return dateA - dateB
       })
-      
-      setMessages(sortedMessages)
 
-      // Завантажуємо інформацію про користувачів за from та to
-      if (data && data.length > 0) {
-        const fromChatIds = [...new Set(data.map((m) => m.from).filter(Boolean))]
-        const toChatIds = [...new Set(data.map((m) => m.to).filter(Boolean))]
-        const allChatIds = [...new Set([...fromChatIds, ...toChatIds])]
-        
-        const userInfoMap: Record<string | number, any> = {}
-        const workerInfoMap: Record<string | number, any> = {}
+      // Додаємо інформацію про користувачів, які є в повідомленнях, але не в початковому списку
+      // НОВА СТРУКТУРА: user_id, worker_id, message, sender
+      const allChatIdsInMessages = new Set<string | number>()
+      sortedMessages.forEach((m: any) => {
+        if (m.user_id) allChatIdsInMessages.add(String(m.user_id))
+        if (m.worker_id) allChatIdsInMessages.add(String(m.worker_id))
+      })
 
-        await Promise.all(
-          allChatIds.map(async (chatId) => {
-            // Завантажуємо користувача
-            const { data: userData } = await supabase
-              .from('users')
-              .select('id, chat_id, first_name, username, ref_id, worker_comment')
-              .eq('chat_id', chatId)
-              .single()
+      // Завантажуємо додаткових користувачів та воркерів, які є в повідомленнях
+      const missingChatIds = Array.from(allChatIdsInMessages).filter(
+        (id) => !userInfoMap[id]
+      )
 
-            if (userData) {
-              userInfoMap[chatId] = userData
+      if (missingChatIds.length > 0) {
+        const { data: missingUsersData } = await supabase
+          .from('users')
+          .select('id, chat_id, first_name, username, ref_id, worker_comment')
+          .in('chat_id', missingChatIds)
 
-              // Якщо є ref_id, завантажуємо воркера
-              if (userData.ref_id) {
-                const { data: workerData } = await supabase
-                  .from('users')
-                  .select('id, chat_id, first_name, username, worker_comment')
-                  .eq('chat_id', userData.ref_id)
-                  .single()
-
-                if (workerData) {
-                  workerInfoMap[userData.ref_id] = workerData
-                }
-              }
+        missingUsersData?.forEach((user: any) => {
+          if (user.chat_id) {
+            userInfoMap[user.chat_id] = user
+            if (user.ref_id && !workerInfoMap[user.ref_id]) {
+              workerChatIds.add(user.ref_id)
             }
-          })
-        )
-
-        setMessagesUserInfo(userInfoMap)
-        setMessagesWorkerInfo(workerInfoMap)
+          }
+        })
       }
+
+      // Оновлюємо стан
+      setMessages(sortedMessages)
+      setMessagesUserInfo(userInfoMap)
+      setMessagesWorkerInfo(workerInfoMap)
+
+      console.log(`✅ Завантажено: ${usersData.length} користувачів, ${sortedMessages.length} повідомлень`)
     } catch (err: any) {
       console.error('Ошибка загрузки повідомлень', err)
       setError(err.message || 'Не удалось загрузить повідомлення.')
@@ -1688,6 +1827,15 @@ https://t.me/+sxC0iO1h8hpiZGJi`
                                   >
                                     {worker.usersCount ?? 0}
                                   </button>
+                                  {isSuperAdmin ? (
+                                    <button
+                                      className="admin-trading-add-user-btn"
+                                      onClick={() => setShowAddUserModal(worker.id)}
+                                      title="Додати користувача"
+                                    >
+                                      <Plus size={16} />
+                                    </button>
+                                  ) : null}
                                 </>
                               ) : (
                                 <span className="admin-trading-worker-card-value">0</span>
@@ -2573,22 +2721,23 @@ https://t.me/+sxC0iO1h8hpiZGJi`
                   ) : (
                     <>
                       {(() => {
-                        // Групуємо повідомлення за отримувачами (to)
+                        // Групуємо повідомлення за користувачами (user_id)
+                        // НОВА СТРУКТУРА: user_id, worker_id, message, sender
                         // Фільтруємо тільки тих користувачів, у яких ref_id дорівнює currentUserRefId
                         const recipientsMap = new Map<string | number, { messages: any[], user: any, lastMessageTime: string, lastMessage: any | null }>()
                         
                         messages.forEach((message) => {
-                          const toId = message.to
-                          if (!toId) return
+                          const userId = message.user_id
+                          if (!userId) return
                           
-                          const user = messagesUserInfo[toId]
+                          const user = messagesUserInfo[userId]
                           // Показуємо тільки користувачів, у яких ref_id дорівнює currentUserRefId
                           if (currentUserRefId && user?.ref_id !== currentUserRefId) {
                             return
                           }
                           
-                          if (!recipientsMap.has(toId)) {
-                            recipientsMap.set(toId, {
+                          if (!recipientsMap.has(userId)) {
+                            recipientsMap.set(userId, {
                               messages: [],
                               user: user || null,
                               lastMessageTime: message.created_at || '',
@@ -2596,7 +2745,7 @@ https://t.me/+sxC0iO1h8hpiZGJi`
                             })
                           }
                           
-                          const recipient = recipientsMap.get(toId)!
+                          const recipient = recipientsMap.get(userId)!
                           recipient.messages.push(message)
                           
                           // Оновлюємо час останнього повідомлення та саме повідомлення
@@ -2610,7 +2759,7 @@ https://t.me/+sxC0iO1h8hpiZGJi`
                           }
                         })
 
-                        const recipients = Array.from(recipientsMap.entries()).map(([toId, data]) => {
+                        const recipients = Array.from(recipientsMap.entries()).map(([userId, data]) => {
                           // Знаходимо останнє повідомлення (найновіше за created_at)
                           const lastMessage = data.messages.reduce((latest, msg) => {
                             if (!latest) return msg
@@ -2619,11 +2768,11 @@ https://t.me/+sxC0iO1h8hpiZGJi`
                             return msgTime > latestTime ? msg : latest
                           }, null as any)
 
-                          // Визначаємо, чи останнє повідомлення від користувача (from === toId)
-                          const isLastMessageFromUser = lastMessage && String(lastMessage.from) === String(toId)
+                          // Визначаємо, чи останнє повідомлення від користувача (sender === 'user')
+                          const isLastMessageFromUser = lastMessage && lastMessage.sender === 'user'
 
                           return {
-                            toId,
+                            userId,
                             ...data,
                             messageCount: data.messages.length,
                             lastMessage,
@@ -2653,9 +2802,9 @@ https://t.me/+sxC0iO1h8hpiZGJi`
                               {recipients.map((recipient) => {
                                 return (
                                   <div
-                                    key={String(recipient.toId)}
+                                    key={String(recipient.userId)}
                                     className={`admin-trading-recipient-card ${recipient.isLastMessageFromUser ? 'admin-trading-recipient-card--unread' : ''}`}
-                                    onClick={() => navigate(`/admin/trading/messages/${recipient.toId}`, { state: { fromTab: activeTab } })}
+                                    onClick={() => navigate(`/admin/trading/messages/${recipient.userId}`, { state: { fromTab: activeTab } })}
                                   >
                                     <div className="admin-trading-recipient-card-header">
                                       <div className="admin-trading-recipient-card-name">
@@ -2664,7 +2813,7 @@ https://t.me/+sxC0iO1h8hpiZGJi`
                                             {recipient.user.first_name || 'Користувач'} {recipient.user.username && `(@${recipient.user.username})`}
                                           </>
                                         ) : (
-                                          `Chat ID: ${recipient.toId}`
+                                          `Chat ID: ${recipient.userId}`
                                         )}
                                       </div>
                                       {recipient.lastMessageTime && (
@@ -2691,7 +2840,7 @@ https://t.me/+sxC0iO1h8hpiZGJi`
                                         className="admin-trading-recipient-card-button"
                                         onClick={(e) => {
                                           e.stopPropagation()
-                                        navigate(`/admin/trading/messages/${recipient.toId}`, { state: { fromTab: activeTab } })
+                                        navigate(`/admin/trading/messages/${recipient.userId}`, { state: { fromTab: activeTab } })
                                         }}
                                       >
                                         Відкрити чат →
