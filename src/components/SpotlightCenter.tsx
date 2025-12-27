@@ -103,8 +103,8 @@ function SpotlightCenter() {
   const [error, setError] = useState<string | null>(null)
   const [currentTime, setCurrentTime] = useState(Date.now())
   const coinSchedule = useMemo(() => {
-    // Стартова дата: 11 листопада 2025, 22:00 UTC+0
-    const startDate = new Date(Date.UTC(2025, 10, 11, 22, 0, 0)) // місяць 10 = листопад (0-індексація
+    // Стартова дата: поточний момент (щоб всі монети були активні)
+    const startDate = new Date()
     return generateCoinSchedule({ eventCount: 20, startDate })
   }, [])
   const dateFormatter = useMemo(

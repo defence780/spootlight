@@ -30,11 +30,65 @@ const AllocationPage = () => {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
 
-  const coinSchedule = useMemo(() => generateCoinSchedule({ eventCount: 40 }), [])
-  const activePositions = useMemo(
-    () => new Set(coinSchedule.initialState.active.map((coin) => coin.id)),
-    [coinSchedule]
-  )
+  const [currentTime, setCurrentTime] = useState(Date.now())
+  
+  const coinSchedule = useMemo(() => {
+    // Стартова дата: поточний момент (щоб всі монети були активні)
+    const startDate = new Date()
+    return generateCoinSchedule({ eventCount: 40, startDate })
+  }, [])
+
+  // Оновлюємо поточний час кожну секунду для коректного розрахунку активних монет
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentTime(Date.now())
+    }, 1000)
+    return () => clearInterval(interval)
+  }, [])
+
+  // Розраховуємо поточні активні монети з урахуванням часу та подій
+  const activePositions = useMemo(() => {
+    const activeCoinsMap = new Map<number, { id: number; activatedAt: string; expiresAt: string }>()
+    
+    // Починаємо з початкових активних монет
+    coinSchedule.initialState.active.forEach((coin) => {
+      if (coin.activatedAt && coin.expiresAt) {
+        const expiresTime = new Date(coin.expiresAt).getTime()
+        if (currentTime < expiresTime) {
+          activeCoinsMap.set(coin.id, {
+            id: coin.id,
+            activatedAt: coin.activatedAt,
+            expiresAt: coin.expiresAt
+          })
+        }
+      }
+    })
+
+    // Застосовуємо всі події, які вже відбулися до поточного часу
+    const sortedEvents = [...coinSchedule.events].sort(
+      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    )
+
+    for (const event of sortedEvents) {
+      const eventTime = new Date(event.timestamp).getTime()
+      if (eventTime <= currentTime) {
+        // Видаляємо монету, що закінчилася
+        activeCoinsMap.delete(event.expiringCoin)
+        
+        // Додаємо нову активну монету
+        const expiresTime = new Date(event.activationEndsAt).getTime()
+        if (currentTime < expiresTime) {
+          activeCoinsMap.set(event.activatingCoin, {
+            id: event.activatingCoin,
+            activatedAt: event.timestamp,
+            expiresAt: event.activationEndsAt
+          })
+        }
+      }
+    }
+
+    return new Set(Array.from(activeCoinsMap.keys()))
+  }, [coinSchedule, currentTime])
 
   useEffect(() => {
     const fetchCoins = async () => {
@@ -169,11 +223,43 @@ const AllocationPage = () => {
         throw new Error(balanceError.message)
       }
 
-      const activeCoin = activePositions.has(Number(coinRecord.position))
-        ? coinSchedule.initialState.active.find((coin) => coin.id === Number(coinRecord.position))
-        : undefined
-
-      const expiredAt = activeCoin?.expiresAt ?? null
+      // Знаходимо активну монету з урахуванням поточного часу та подій
+      let activeCoin = undefined
+      let expiredAt = null
+      
+      if (activePositions.has(Number(coinRecord.position))) {
+        // Перевіряємо початкові активні монети
+        const initialActive = coinSchedule.initialState.active.find((coin) => coin.id === Number(coinRecord.position))
+        if (initialActive && initialActive.expiresAt) {
+          const expiresTime = new Date(initialActive.expiresAt).getTime()
+          if (currentTime < expiresTime) {
+            activeCoin = initialActive
+            expiredAt = initialActive.expiresAt
+          }
+        }
+        
+        // Перевіряємо монети, активовані через події
+        if (!activeCoin) {
+          const sortedEvents = [...coinSchedule.events].sort(
+            (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+          )
+          for (const event of sortedEvents) {
+            const eventTime = new Date(event.timestamp).getTime()
+            if (eventTime <= currentTime && event.activatingCoin === Number(coinRecord.position)) {
+              const expiresTime = new Date(event.activationEndsAt).getTime()
+              if (currentTime < expiresTime) {
+                activeCoin = {
+                  id: event.activatingCoin,
+                  activatedAt: event.timestamp,
+                  expiresAt: event.activationEndsAt
+                }
+                expiredAt = event.activationEndsAt
+                break
+              }
+            }
+          }
+        }
+      }
 
       const { error: allocationError } = await supabase.from('spotlights_allocations').insert({
         users_id: userRow.id,
