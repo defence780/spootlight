@@ -20,6 +20,7 @@ interface SpotlightUserRecord {
   balance?: number | string | null
   password?: string | null
   created_at?: string
+  ref_id?: string | number | null
 }
 
 interface SpotlightDepositRecord {
@@ -63,6 +64,12 @@ const AdminDashboard = () => {
   const [balanceError, setBalanceError] = useState('')
   const [balanceStatus, setBalanceStatus] = useState('')
   const [balanceLoading, setBalanceLoading] = useState(false)
+  const [makeAdminModalOpen, setMakeAdminModalOpen] = useState(false)
+  const [adminEmail, setAdminEmail] = useState<string | null>(null)
+  const [adminRefId, setAdminRefId] = useState('')
+  const [adminError, setAdminError] = useState('')
+  const [adminStatus, setAdminStatus] = useState('')
+  const [adminLoading, setAdminLoading] = useState(false)
   const coinSchedule = useMemo(() => generateCoinSchedule({ eventCount: 30 }), [])
 
   const parseBalanceValue = (value: unknown): number | null => {
@@ -139,7 +146,7 @@ const AdminDashboard = () => {
     try {
       const { data, error } = await supabase
         .from('spotlights_users')
-        .select('email, type, balance, password, created_at')
+        .select('email, type, balance, password, created_at, ref_id')
         .order('created_at', { ascending: false })
 
       if (error) throw error
@@ -315,6 +322,69 @@ const AdminDashboard = () => {
     }
   }
 
+  const openMakeAdminModal = (email: string) => {
+    console.log('Opening make admin modal for:', email)
+    setAdminEmail(email)
+    setAdminRefId('')
+    setAdminError('')
+    setAdminStatus('')
+    setMakeAdminModalOpen(true)
+  }
+
+  const closeMakeAdminModal = () => {
+    setMakeAdminModalOpen(false)
+    setAdminEmail(null)
+    setAdminRefId('')
+    setAdminError('')
+    setAdminStatus('')
+  }
+
+  const handleMakeAdmin = async (event: FormEvent) => {
+    event.preventDefault()
+    if (!adminEmail) return
+
+    setAdminError('')
+    setAdminStatus('')
+    setAdminLoading(true)
+
+    // Перевірка, чи введено ref_id
+    const refIdValue = adminRefId.trim()
+    if (!refIdValue) {
+      setAdminError('Обов\'язково потрібно ввести ref_id')
+      setAdminLoading(false)
+      return
+    }
+
+    // Перевірка, чи ref_id є числом
+    const refIdNum = parseFloat(refIdValue)
+    if (Number.isNaN(refIdNum) || !Number.isFinite(refIdNum)) {
+      setAdminError('ref_id має бути числом')
+      setAdminLoading(false)
+      return
+    }
+
+    try {
+      const { error } = await supabase
+        .from('spotlights_users')
+        .update({ type: 'admin', ref_id: refIdNum })
+        .eq('email', adminEmail)
+
+      if (error) throw error
+
+      setAdminStatus('Користувача успішно зроблено адміном.')
+      setAdminLoading(false)
+      fetchUsers()
+
+      setTimeout(() => {
+        closeMakeAdminModal()
+      }, 1200)
+    } catch (err: any) {
+      console.error('Ошибка изменения роли пользователя', err)
+      setAdminError(err.message || 'Не удалось изменить роль пользователя.')
+      setAdminLoading(false)
+    }
+  }
+
   const formatDate = (value?: string | null) => {
     if (!value) return '—'
     try {
@@ -389,26 +459,42 @@ const AdminDashboard = () => {
                   <tr>
                     <th>Email</th>
                     <th>Роль</th>
+                    <th>ref_id</th>
                     <th>Баланс</th>
                     <th>Пароль</th>
                     <th>Создан</th>
+                    <th>Действия</th>
                   </tr>
                 </thead>
                 <tbody>
                   {users.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="empty-cell">Пользователи не найдены</td>
+                      <td colSpan={7} className="empty-cell">Пользователи не найдены</td>
                     </tr>
                   ) : (
                     users.map((user) => {
                       const normalizedBalance = parseBalanceValue(user.balance)
+                      const isAdmin = user.type === 'admin' || user.type === 'superadmin'
                       return (
                         <tr key={`${user.email}-${user.created_at}`}>
                           <td>{user.email}</td>
                           <td>{user.type ?? 'user'}</td>
+                          <td>{user.ref_id ?? '—'}</td>
                           <td>{normalizedBalance !== null ? `${normalizedBalance.toFixed(2)} USDT` : '—'}</td>
                           <td className="admin-password-cell">{user.password ?? '—'}</td>
                           <td>{formatDate(user.created_at)}</td>
+                          <td>
+                            {!isAdmin && (
+                              <button
+                                type="button"
+                                className="admin-action-button"
+                                onClick={() => openMakeAdminModal(user.email)}
+                                title="Сделать админом"
+                              >
+                                Сделать админом
+                              </button>
+                            )}
+                          </td>
                         </tr>
                       )
                     })
@@ -660,6 +746,46 @@ const AdminDashboard = () => {
           </div>
         </div>
       </section>
+
+      {/* Модальное окно для назначения админа */}
+      {makeAdminModalOpen && (
+        <div className="admin-modal-overlay" onClick={closeMakeAdminModal}>
+          <div className="admin-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="admin-modal-header">
+              <h2>Сделать пользователя админом</h2>
+              <button className="admin-modal-close" onClick={closeMakeAdminModal} type="button">
+                ×
+              </button>
+            </div>
+            <div className="admin-modal-body">
+              <p className="admin-modal-info">
+                Email: <strong>{adminEmail}</strong>
+              </p>
+              <form className="balance-form" onSubmit={handleMakeAdmin}>
+                <label htmlFor="adminRefIdInput">
+                  ref_id <span style={{ color: 'red' }}>*</span>
+                </label>
+                <input
+                  id="adminRefIdInput"
+                  type="number"
+                  step="1"
+                  inputMode="numeric"
+                  placeholder="Введите ref_id (обязательно)"
+                  value={adminRefId}
+                  onChange={(event) => setAdminRefId(event.target.value)}
+                  disabled={adminLoading}
+                  required
+                />
+                {adminError && <p className="balance-error">{adminError}</p>}
+                {adminStatus && <p className="balance-success">{adminStatus}</p>}
+                <button type="submit" className="balance-submit" disabled={adminLoading}>
+                  {adminLoading ? 'Сохранение...' : 'Сохранить'}
+                </button>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

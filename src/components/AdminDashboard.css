@@ -7,7 +7,7 @@
 
 .admin-card {
   width: 100%;
-  max-width: 1100px;
+  max-width: 100%;
   background: rgba(18, 18, 28, 0.85);
   border: 1px solid rgba(102, 126, 234, 0.25);
   border-radius: 24px;
@@ -17,6 +17,7 @@
   display: flex;
   flex-direction: column;
   gap: 2.5rem;
+  overflow-x: visible;
 }
 
 .admin-header {
@@ -115,12 +116,16 @@
   background: rgba(10, 10, 16, 0.85);
   border: 1px solid rgba(102, 126, 234, 0.2);
   border-radius: 16px;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: visible;
+  width: 100%;
 }
 
 .admin-table {
   width: 100%;
+  min-width: 100%;
   border-collapse: collapse;
+  table-layout: auto;
 }
 
 .admin-table thead {
@@ -134,6 +139,11 @@
   color: #dfe2ff;
   border-bottom: 1px solid rgba(102, 126, 234, 0.15);
   font-size: 0.95rem;
+  white-space: nowrap;
+}
+
+.admin-table td:last-child {
+  white-space: normal;
 }
 
 .admin-table tbody tr:hover {
@@ -425,7 +435,8 @@
   background: rgba(46, 204, 113, 0.3);
 }
 
-.balance-modal-overlay {
+.balance-modal-overlay,
+.admin-modal-overlay {
   position: fixed;
   inset: 0;
   background: rgba(8, 8, 10, 0.75);
@@ -435,7 +446,8 @@
   padding: 1.5rem;
 }
 
-.balance-modal {
+.balance-modal,
+.admin-modal {
   background: rgba(20, 20, 30, 0.95);
   border-radius: 20px;
   border: 1px solid rgba(102, 126, 234, 0.35);
@@ -445,24 +457,57 @@
   box-shadow: 0 30px 70px rgba(0, 0, 0, 0.45);
 }
 
-.balance-modal-header {
+.balance-modal-header,
+.admin-modal-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  margin-bottom: 1.5rem;
 }
 
-.balance-modal-header h2 {
+.balance-modal-header h2,
+.admin-modal-header h2 {
   margin: 0;
   color: #ffffff;
+  font-size: 1.5rem;
 }
 
-.balance-close {
+.balance-close,
+.admin-modal-close {
   background: transparent;
   border: none;
   color: #cbd0ff;
   font-size: 1.75rem;
   cursor: pointer;
   line-height: 1;
+  padding: 0;
+  width: 2rem;
+  height: 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.2s ease;
+}
+
+.balance-close:hover,
+.admin-modal-close:hover {
+  color: #ffffff;
+}
+
+.admin-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.admin-modal-info {
+  margin: 0 0 1rem;
+  color: #cbd0ff;
+  font-size: 0.95rem;
+}
+
+.admin-modal-info strong {
+  color: #ffffff;
 }
 
 .balance-email {
