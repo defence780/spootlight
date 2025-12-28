@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { Plus, X, Minus, RotateCcw, RefreshCw, User } from 'lucide-react'
+import { X, RotateCcw, RefreshCw, User } from 'lucide-react'
 import './AdminTradingPage.css'
 import { DEFAULT_TRADING_TAB, TRADING_TABS, TradingTabKey } from '../types/trading'
 
@@ -98,10 +98,6 @@ const AdminTradingPage = () => {
   const [error, setError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<TradingTabKey>(DEFAULT_TRADING_TAB)
   const [workers, setWorkers] = useState<Worker[]>([])
-  const [addingWorkerId, setAddingWorkerId] = useState<number | null>(null)
-  const [newUserChatId, setNewUserChatId] = useState<string>('')
-  const [showAddUserModal, setShowAddUserModal] = useState<number | null>(null)
-  const [removingWorkerId, setRemovingWorkerId] = useState<number | null>(null)
   const [withdrawals, setWithdrawals] = useState<any[]>([])
   const [deposits, setDeposits] = useState<any[]>([])
   const [trades, setTrades] = useState<any[]>([])
@@ -485,52 +481,6 @@ const AdminTradingPage = () => {
     }
   }
 
-  const addUserToWorker = async (workerChatId: string | number, userChatId: string) => {
-    if (!userChatId.trim()) {
-      alert('Введіть chat_id користувача')
-      return
-    }
-
-    // Знаходимо worker.id за chat_id для відстеження
-    const worker = workers.find((w) => w.chat_id === workerChatId)
-    if (worker) {
-      setAddingWorkerId(worker.id)
-    }
-    setError(null)
-
-    try {
-      // Перевіряємо, чи існує користувач з таким chat_id
-      const { data: userData, error: userError } = await supabase
-        .from('users')
-        .select('id, chat_id, ref_id')
-        .eq('chat_id', userChatId.trim())
-        .single()
-
-      if (userError || !userData) {
-        throw new Error('Користувач з таким chat_id не знайдено')
-      }
-
-      // Оновлюємо ref_id користувача на chat_id воркера
-      const { error: updateError } = await supabase
-        .from('users')
-        .update({ ref_id: workerChatId })
-        .eq('chat_id', userChatId.trim())
-
-      if (updateError) throw updateError
-
-      // Оновлюємо список воркерів, щоб оновити кількість користувачів
-      await fetchWorkers()
-
-      setShowAddUserModal(null)
-      setNewUserChatId('')
-      alert('Користувача успішно додано до воркера!')
-    } catch (err: any) {
-      console.error('Ошибка добавления пользователя к воркеру', err)
-      setError(err.message || 'Не удалось добавить пользователя.')
-    } finally {
-      setAddingWorkerId(null)
-    }
-  }
 
   const fetchReports = async (closerChatId: number) => {
     setLoadingReports(true)
@@ -606,34 +556,6 @@ const AdminTradingPage = () => {
     await fetchLeads(closerChatId, status)
   }
 
-  const removeWorker = async (workerId: number, workerChatId: string | number) => {
-    if (!confirm('Ви впевнені, що хочете видалити цього воркера з панелі?')) {
-      return
-    }
-
-    setRemovingWorkerId(workerId)
-    setError(null)
-
-    try {
-      // Оновлюємо worker_comment на null, щоб прибрати воркера з панелі
-      const { error: updateError } = await supabase
-        .from('users')
-        .update({ worker_comment: null })
-        .eq('chat_id', workerChatId)
-
-      if (updateError) throw updateError
-
-      // Оновлюємо список воркерів
-      await fetchWorkers()
-
-      alert('Воркера успішно видалено з панелі!')
-    } catch (err: any) {
-      console.error('Ошибка удаления воркера', err)
-      setError(err.message || 'Не удалось удалить воркера.')
-    } finally {
-      setRemovingWorkerId(null)
-    }
-  }
 
   const fetchWithdrawals = async () => {
     setLoading(true)
@@ -1827,15 +1749,6 @@ https://t.me/+sxC0iO1h8hpiZGJi`
                                   >
                                     {worker.usersCount ?? 0}
                                   </button>
-                                  {isSuperAdmin ? (
-                                    <button
-                                      className="admin-trading-add-user-btn"
-                                      onClick={() => setShowAddUserModal(worker.id)}
-                                      title="Додати користувача"
-                                    >
-                                      <Plus size={16} />
-                                    </button>
-                                  ) : null}
                                 </>
                               ) : (
                                 <span className="admin-trading-worker-card-value">0</span>
