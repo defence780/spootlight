@@ -1,0 +1,307 @@
+.payments-users-page {
+  padding: 2rem;
+  max-width: 1400px;
+  margin: 0 auto;
+  color: #e6e8ff;
+}
+
+.payments-users-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2rem;
+}
+
+.payments-users-header h1 {
+  font-size: 2rem;
+  font-weight: 600;
+  color: #e6e8ff;
+  margin: 0;
+}
+
+.payments-users-refresh-btn {
+  padding: 0.75rem 1.5rem;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.9) 0%, rgba(118, 75, 162, 0.95) 100%);
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+}
+
+.payments-users-refresh-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(102, 126, 234, 0.4);
+}
+
+.payments-users-refresh-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.payments-users-error {
+  padding: 2rem;
+  text-align: center;
+  color: #ff6b6b;
+}
+
+.payments-users-error-message {
+  padding: 1rem;
+  background: rgba(255, 107, 107, 0.1);
+  border: 1px solid rgba(255, 107, 107, 0.3);
+  border-radius: 8px;
+  color: #ff6b6b;
+  margin-bottom: 1.5rem;
+}
+
+.payments-users-search {
+  margin-bottom: 1.5rem;
+}
+
+.payments-users-search input {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  background: rgba(12, 12, 18, 0.6);
+  border: 1px solid rgba(102, 126, 234, 0.3);
+  border-radius: 8px;
+  color: #e6e8ff;
+  font-size: 0.95rem;
+  transition: all 0.3s ease;
+}
+
+.payments-users-search input:focus {
+  outline: none;
+  border-color: rgba(102, 126, 234, 0.6);
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.payments-users-table-container {
+  overflow-x: auto;
+  border-radius: 14px;
+  border: 1px solid rgba(102, 126, 234, 0.3);
+  background: rgba(12, 12, 18, 0.5);
+}
+
+.payments-users-table {
+  width: 100%;
+  border-collapse: collapse;
+  color: #e6e8ff;
+}
+
+.payments-users-table thead {
+  background: rgba(26, 30, 72, 0.6);
+}
+
+.payments-users-table th {
+  padding: 1rem 1.25rem;
+  text-align: left;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(178, 186, 233, 0.9);
+  font-weight: 600;
+  border-bottom: 1px solid rgba(102, 126, 234, 0.3);
+}
+
+.payments-users-table td {
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid rgba(102, 126, 234, 0.15);
+  font-size: 0.95rem;
+}
+
+.payments-users-table tbody tr:hover {
+  background: rgba(102, 126, 234, 0.1);
+}
+
+.payments-users-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.payments-users-role {
+  display: inline-block;
+  padding: 0.35rem 0.75rem;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.payments-users-role-worker {
+  background: rgba(46, 204, 113, 0.2);
+  color: #6ee7b7;
+  border: 1px solid rgba(46, 204, 113, 0.4);
+}
+
+.payments-users-role-closer {
+  background: rgba(102, 126, 234, 0.2);
+  color: #a5b4fc;
+  border: 1px solid rgba(102, 126, 234, 0.4);
+}
+
+.payments-users-role-superadmin {
+  background: rgba(255, 193, 7, 0.2);
+  color: #ffd54f;
+  border: 1px solid rgba(255, 193, 7, 0.4);
+}
+
+.payments-users-role-none {
+  background: rgba(108, 117, 125, 0.2);
+  color: #adb5bd;
+  border: 1px solid rgba(108, 117, 125, 0.4);
+}
+
+.payments-users-check {
+  color: #6ee7b7;
+  font-weight: bold;
+  font-size: 1.2rem;
+}
+
+.payments-users-cross {
+  color: #adb5bd;
+}
+
+.payments-users-edit-btn {
+  padding: 0.5rem 1rem;
+  background: rgba(102, 126, 234, 0.2);
+  color: #a5b4fc;
+  border: 1px solid rgba(102, 126, 234, 0.4);
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.payments-users-edit-btn:hover {
+  background: rgba(102, 126, 234, 0.3);
+  transform: translateY(-1px);
+}
+
+.payments-users-loading,
+.payments-users-empty {
+  text-align: center;
+  padding: 3rem;
+  color: rgba(178, 186, 233, 0.6);
+}
+
+.payments-users-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.payments-users-modal {
+  background: rgba(12, 12, 18, 0.95);
+  border: 1px solid rgba(102, 126, 234, 0.3);
+  border-radius: 14px;
+  padding: 2rem;
+  max-width: 500px;
+  width: 90%;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.payments-users-modal h2 {
+  margin: 0 0 1.5rem 0;
+  color: #e6e8ff;
+  font-size: 1.5rem;
+}
+
+.payments-users-form-group {
+  margin-bottom: 1.5rem;
+}
+
+.payments-users-form-group label {
+  display: block;
+  margin-bottom: 0.5rem;
+  color: rgba(178, 186, 233, 0.9);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.payments-users-form-group input[type="text"],
+.payments-users-form-group select {
+  width: 100%;
+  padding: 0.75rem;
+  background: rgba(12, 12, 18, 0.6);
+  border: 1px solid rgba(102, 126, 234, 0.3);
+  border-radius: 8px;
+  color: #e6e8ff;
+  font-size: 0.95rem;
+  transition: all 0.3s ease;
+}
+
+.payments-users-form-group input[type="text"]:focus,
+.payments-users-form-group select:focus {
+  outline: none;
+  border-color: rgba(102, 126, 234, 0.6);
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.payments-users-form-group input[type="checkbox"] {
+  margin-right: 0.5rem;
+  width: auto;
+}
+
+.payments-users-form-group small {
+  display: block;
+  margin-top: 0.25rem;
+  color: rgba(178, 186, 233, 0.6);
+  font-size: 0.8rem;
+}
+
+.payments-users-modal-actions {
+  display: flex;
+  gap: 1rem;
+  justify-content: flex-end;
+  margin-top: 2rem;
+}
+
+.payments-users-cancel-btn,
+.payments-users-save-btn {
+  padding: 0.75rem 1.5rem;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.payments-users-cancel-btn {
+  background: rgba(108, 117, 125, 0.2);
+  color: #adb5bd;
+  border: 1px solid rgba(108, 117, 125, 0.4);
+}
+
+.payments-users-cancel-btn:hover {
+  background: rgba(108, 117, 125, 0.3);
+}
+
+.payments-users-save-btn {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.9) 0%, rgba(118, 75, 162, 0.95) 100%);
+  color: #ffffff;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+}
+
+.payments-users-save-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(102, 126, 234, 0.4);
+}
+
+.payments-users-save-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+

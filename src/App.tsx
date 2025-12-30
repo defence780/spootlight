@@ -13,6 +13,7 @@ import AdminTradingPage from './components/AdminTradingPage'
 import WorkerUsersPage from './components/WorkerUsersPage'
 import MessagesChatPage from './components/MessagesChatPage'
 import NewEmployeeChatPage from './components/NewEmployeeChatPage'
+import PaymentsUsersPage from './components/PaymentsUsersPage'
 import Header from './components/Header'
 
 function App() {
@@ -38,6 +39,7 @@ function App() {
             <Route path="/admin/trading/worker/:chatId/users" element={<WorkerUsersPage />} />
             <Route path="/admin/trading/messages/:toChatId" element={<MessagesChatPage />} />
             <Route path="/admin/trading/new-employee/:chatId" element={<NewEmployeeChatPage />} />
+            <Route path="/admin/payments/users" element={<PaymentsUsersPage />} />
           </Routes>
         </main>
       </div>

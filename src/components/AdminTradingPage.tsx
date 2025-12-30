@@ -3172,6 +3172,14 @@ https://t.me/+sxC0iO1h8hpiZGJi`
                     <button className="admin-trading-subtle-button" onClick={fetchPayments} disabled={loading}>
                       Обновить
                     </button>
+                    {isSuperAdmin && (
+                      <button 
+                        className="admin-trading-subtle-button" 
+                        onClick={() => navigate('/admin/payments/users')}
+                      >
+                        Управління користувачами
+                      </button>
+                    )}
                     <button className="admin-trading-primary-button" onClick={() => openPaymentForm()}>
                       + Добавить платеж
                     </button>
