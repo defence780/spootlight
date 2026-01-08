@@ -575,7 +575,7 @@ const WorkerUsersPage = () => {
     }
   }
 
-  const closeTrade = async (userId: number, chatId: string | number, tradeId: number, amount: number | string | null) => {
+  const closeTrade = async (userId: number, chatId: string | number, tradeId: number, amount: number | string | null, isWin: boolean) => {
     setClosingTradeId(tradeId)
     setError(null)
     setSuccessMessage(null)
@@ -586,8 +586,15 @@ const WorkerUsersPage = () => {
       }
 
       const tradeAmount = Number(amount)
-      const bonusAmount = tradeAmount * 0.75
-      const totalAmount = tradeAmount + bonusAmount
+      let bonusAmount = 0
+      let totalAmount = tradeAmount
+
+      if (isWin) {
+        // Якщо виграш - додаємо бонус 75%
+        bonusAmount = tradeAmount * 0.75
+        totalAmount = tradeAmount + bonusAmount
+      }
+      // Якщо програш - totalAmount залишається рівним tradeAmount (повертаємо тільки початкову суму)
 
       // Отримуємо поточний баланс користувача
       const { data: userData, error: userError } = await supabase
@@ -609,7 +616,7 @@ const WorkerUsersPage = () => {
           .eq('chat_id', chatId),
         supabase
           .from('trades')
-          .update({ isActive: false })
+          .update({ isActive: false, isWin: isWin })
           .eq('id', tradeId)
       ])
 
@@ -624,7 +631,7 @@ const WorkerUsersPage = () => {
               ...user,
               usdt_amount: newUsdtAmount,
               trades: user.trades?.map((t) =>
-                t.id === tradeId ? { ...t, isActive: false } : t
+                t.id === tradeId ? { ...t, isActive: false, isWin: isWin } : t
               ) || []
             }
           }
@@ -632,7 +639,11 @@ const WorkerUsersPage = () => {
         })
       )
 
-      setSuccessMessage(`Трейд успішно закрито! Нараховано ${totalAmount.toFixed(2)} USDT (${tradeAmount.toFixed(2)} + бонус ${bonusAmount.toFixed(2)})`)
+      if (isWin) {
+        setSuccessMessage(`Трейд успішно закрито як виграш! Нараховано ${totalAmount.toFixed(2)} USDT (${tradeAmount.toFixed(2)} + бонус ${bonusAmount.toFixed(2)})`)
+      } else {
+        setSuccessMessage(`Трейд успішно закрито як програш. Повернуто ${totalAmount.toFixed(2)} USDT`)
+      }
       setTimeout(() => {
         setSuccessMessage(null)
       }, 3000)
@@ -1140,14 +1151,36 @@ const WorkerUsersPage = () => {
                                   {trade.isActive === true && user.chat_id && (
                                     <div className="worker-users-subsection-actions">
                                       <button
-                                        className="worker-users-close-trade-btn"
+                                        className="worker-users-close-trade-btn worker-users-close-trade-btn--win"
                                         onClick={() => {
                                           if (user.chat_id) {
-                                            closeTrade(user.id, user.chat_id, trade.id, trade.amount ?? null)
+                                            closeTrade(user.id, user.chat_id, trade.id, trade.amount ?? null, true)
                                           }
                                         }}
                                         disabled={closingTradeId === trade.id}
-                                        title="Закрити трейд вручну"
+                                        title="Закрити як виграш"
+                                      >
+                                        {closingTradeId === trade.id ? (
+                                          <>
+                                            <RefreshCw size={14} className="spinning" />
+                                            <span>Закриття...</span>
+                                          </>
+                                        ) : (
+                                          <>
+                                            <Check size={14} />
+                                            <span>Виграш</span>
+                                          </>
+                                        )}
+                                      </button>
+                                      <button
+                                        className="worker-users-close-trade-btn worker-users-close-trade-btn--loss"
+                                        onClick={() => {
+                                          if (user.chat_id) {
+                                            closeTrade(user.id, user.chat_id, trade.id, trade.amount ?? null, false)
+                                          }
+                                        }}
+                                        disabled={closingTradeId === trade.id}
+                                        title="Закрити як програш"
                                       >
                                         {closingTradeId === trade.id ? (
                                           <>
@@ -1157,7 +1190,7 @@ const WorkerUsersPage = () => {
                                         ) : (
                                           <>
                                             <X size={14} />
-                                            <span>Закрити вручну</span>
+                                            <span>Програш</span>
                                           </>
                                         )}
                                       </button>

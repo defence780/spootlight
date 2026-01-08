@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { X, RotateCcw, RefreshCw, User } from 'lucide-react'
+import { X, RotateCcw, RefreshCw, User, Check } from 'lucide-react'
 import './AdminTradingPage.css'
 import { DEFAULT_TRADING_TAB, TRADING_TABS, TradingTabKey } from '../types/trading'
 
@@ -137,6 +137,7 @@ const AdminTradingPage = () => {
   const [payments, setPayments] = useState<any[]>([])
   const [currentPaymentsPage, setCurrentPaymentsPage] = useState(1)
   const [paymentSearch, setPaymentSearch] = useState('')
+  const [closingTradeId, setClosingTradeId] = useState<number | null>(null)
   const [formModalOpen, setFormModalOpen] = useState(false)
   const [editingPayment, setEditingPayment] = useState<any | null>(null)
   const [paymentFormData, setPaymentFormData] = useState({ closer: '', smm: '', amount: '', type: 'trading' as 'trading' | 'ico', platform: '', job: '' })
@@ -792,6 +793,75 @@ const AdminTradingPage = () => {
       setError(err.message || 'Не удалось загрузить депозити.')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const closeTrade = async (chatId: string | number | null, tradeId: number, amount: number | string | null, isWin: boolean) => {
+    if (!chatId) {
+      setError('Chat ID не знайдено')
+      return
+    }
+
+    setClosingTradeId(tradeId)
+    setError(null)
+
+    try {
+      if (!amount || Number.isNaN(Number(amount))) {
+        throw new Error('Некоректна сума трейду')
+      }
+
+      const tradeAmount = Number(amount)
+      let bonusAmount = 0
+      let totalAmount = tradeAmount
+
+      if (isWin) {
+        // Якщо виграш - додаємо бонус 75%
+        bonusAmount = tradeAmount * 0.75
+        totalAmount = tradeAmount + bonusAmount
+      }
+      // Якщо програш - totalAmount залишається рівним tradeAmount (повертаємо тільки початкову суму)
+
+      // Отримуємо поточний баланс користувача
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .select('usdt_amount')
+        .eq('chat_id', chatId)
+        .single()
+
+      if (userError) throw userError
+
+      const currentUsdtAmount = Number(userData?.usdt_amount || 0)
+      const newUsdtAmount = currentUsdtAmount + totalAmount
+
+      // Оновлюємо баланс користувача та статус трейду
+      const [updateUserResult, updateTradeResult] = await Promise.all([
+        supabase
+          .from('users')
+          .update({ usdt_amount: newUsdtAmount })
+          .eq('chat_id', chatId),
+        supabase
+          .from('trades')
+          .update({ isActive: false, isWin: isWin })
+          .eq('id', tradeId)
+      ])
+
+      if (updateUserResult.error) throw updateUserResult.error
+      if (updateTradeResult.error) throw updateTradeResult.error
+
+      // Оновлюємо локальний стан
+      setTrades((prev) =>
+        prev.map((trade) =>
+          trade.id === tradeId ? { ...trade, isActive: false, isWin: isWin } : trade
+        )
+      )
+
+      // Оновлюємо список трейдів
+      await fetchTrades()
+    } catch (err: any) {
+      console.error('Ошибка закрытия трейда', err)
+      setError(err.message || 'Не удалось закрыть трейд.')
+    } finally {
+      setClosingTradeId(null)
     }
   }
 
@@ -2581,6 +2651,8 @@ https://t.me/+faqFs28Xnx85Mjdi`
                           chat_id: 'Chat ID'
                         }
 
+                        const isActive = trade.isActive === true || trade.isActive === 'true' || String(trade.isActive).toLowerCase() === 'true'
+                        
                         return (
                           <div key={trade.id} className="admin-trading-worker-card">
                             {Object.entries(trade).map(([key, value]) => {
@@ -2609,6 +2681,50 @@ https://t.me/+faqFs28Xnx85Mjdi`
                                 </div>
                               )
                             })}
+                            {isActive && (
+                              <div className="admin-trading-worker-card-actions">
+                                <button
+                                  className="admin-trading-close-trade-btn admin-trading-close-trade-btn--win"
+                                  onClick={() => {
+                                    closeTrade(trade.chat_id, trade.id, trade.amount ?? null, true)
+                                  }}
+                                  disabled={closingTradeId === trade.id}
+                                  title="Закрити як виграш"
+                                >
+                                  {closingTradeId === trade.id ? (
+                                    <>
+                                      <RefreshCw size={14} className="spinning" />
+                                      <span>Закриття...</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Check size={14} />
+                                      <span>Виграш</span>
+                                    </>
+                                  )}
+                                </button>
+                                <button
+                                  className="admin-trading-close-trade-btn admin-trading-close-trade-btn--loss"
+                                  onClick={() => {
+                                    closeTrade(trade.chat_id, trade.id, trade.amount ?? null, false)
+                                  }}
+                                  disabled={closingTradeId === trade.id}
+                                  title="Закрити як програш"
+                                >
+                                  {closingTradeId === trade.id ? (
+                                    <>
+                                      <RefreshCw size={14} className="spinning" />
+                                      <span>Закриття...</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <X size={14} />
+                                      <span>Програш</span>
+                                    </>
+                                  )}
+                                </button>
+                              </div>
+                            )}
                           </div>
                         )
                             })}

@@ -623,6 +623,12 @@
   animation: spin 1s linear infinite;
 }
 
+.worker-users-subsection-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
 .worker-users-close-trade-btn {
   display: flex;
   align-items: center;
@@ -633,13 +639,30 @@
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
-  border: 1px solid rgba(239, 68, 68, 0.4);
-  background: rgba(239, 68, 68, 0.15);
-  color: #fca5a5;
   white-space: nowrap;
+  border: none;
 }
 
-.worker-users-close-trade-btn:hover:not(:disabled) {
+.worker-users-close-trade-btn--win {
+  background: rgba(76, 175, 80, 0.2);
+  border: 1px solid rgba(76, 175, 80, 0.4);
+  color: #81c784;
+}
+
+.worker-users-close-trade-btn--win:hover:not(:disabled) {
+  background: rgba(76, 175, 80, 0.3);
+  border-color: rgba(76, 175, 80, 0.6);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(76, 175, 80, 0.2);
+}
+
+.worker-users-close-trade-btn--loss {
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #fca5a5;
+}
+
+.worker-users-close-trade-btn--loss:hover:not(:disabled) {
   background: rgba(239, 68, 68, 0.25);
   border-color: rgba(239, 68, 68, 0.6);
   transform: translateY(-1px);
