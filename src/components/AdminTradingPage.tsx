@@ -1127,7 +1127,7 @@ const AdminTradingPage = () => {
     try {
       const approvalMessage = `Поздравляю, ваша заявка на обучение одобрена, заходите в группу обучения.
 
-https://t.me/+sxC0iO1h8hpiZGJi`
+https://t.me/+faqFs28Xnx85Mjdi`
 
       const { error: functionError } = await supabase.functions.invoke('logic', {
         body: {
