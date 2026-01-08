@@ -435,6 +435,16 @@
   background: rgba(46, 204, 113, 0.3);
 }
 
+.admin-action-button--edit {
+  background: rgba(102, 126, 234, 0.2);
+  border: 1px solid rgba(102, 126, 234, 0.4);
+  color: #d4d8ff;
+}
+
+.admin-action-button--edit:hover {
+  background: rgba(102, 126, 234, 0.3);
+}
+
 .balance-modal-overlay,
 .admin-modal-overlay {
   position: fixed;
@@ -537,9 +547,21 @@
   outline: none;
 }
 
-.balance-form input:focus {
+.balance-form input:focus,
+.balance-form select:focus {
   border-color: rgba(102, 126, 234, 0.55);
   box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.2);
+}
+
+.balance-form select {
+  background: rgba(12, 12, 18, 0.85);
+  border: 1px solid rgba(102, 126, 234, 0.35);
+  border-radius: 12px;
+  padding: 0.6rem 0.75rem;
+  color: #ffffff;
+  font-size: 1rem;
+  outline: none;
+  cursor: pointer;
 }
 
 .balance-error {

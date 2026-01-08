@@ -70,6 +70,13 @@ const AdminDashboard = () => {
   const [adminError, setAdminError] = useState('')
   const [adminStatus, setAdminStatus] = useState('')
   const [adminLoading, setAdminLoading] = useState(false)
+  const [editUserModalOpen, setEditUserModalOpen] = useState(false)
+  const [editUserEmail, setEditUserEmail] = useState<string | null>(null)
+  const [editUserRole, setEditUserRole] = useState<string>('user')
+  const [editUserRefId, setEditUserRefId] = useState('')
+  const [editUserError, setEditUserError] = useState('')
+  const [editUserStatus, setEditUserStatus] = useState('')
+  const [editUserLoading, setEditUserLoading] = useState(false)
   const coinSchedule = useMemo(() => generateCoinSchedule({ eventCount: 30 }), [])
 
   const parseBalanceValue = (value: unknown): number | null => {
@@ -385,6 +392,94 @@ const AdminDashboard = () => {
     }
   }
 
+  const openEditUserModal = async (email: string) => {
+    setEditUserEmail(email)
+    setEditUserError('')
+    setEditUserStatus('')
+    setEditUserRefId('')
+    setEditUserRole('user')
+    setEditUserLoading(true)
+    setEditUserModalOpen(true)
+    try {
+      const { data, error } = await supabase
+        .from('spotlights_users')
+        .select('type, ref_id')
+        .eq('email', email)
+        .maybeSingle()
+
+      if (error) throw error
+      if (data) {
+        setEditUserRole(data.type || 'user')
+        setEditUserRefId(data.ref_id ? data.ref_id.toString() : '')
+      }
+    } catch (err: any) {
+      console.error('Не удалось получить данные пользователя', err)
+      setEditUserError(err.message || 'Не удалось получить данные пользователя.')
+    } finally {
+      setEditUserLoading(false)
+    }
+  }
+
+  const closeEditUserModal = () => {
+    setEditUserModalOpen(false)
+    setEditUserEmail(null)
+    setEditUserError('')
+    setEditUserStatus('')
+    setEditUserRefId('')
+    setEditUserRole('user')
+    setEditUserLoading(false)
+  }
+
+  const handleEditUser = async (event: FormEvent) => {
+    event.preventDefault()
+    if (!editUserEmail) return
+
+    setEditUserError('')
+    setEditUserStatus('')
+    setEditUserLoading(true)
+
+    // Перевірка ref_id (може бути порожнім)
+    let refIdNum: number | null = null
+    const refIdValue = editUserRefId.trim()
+    if (refIdValue) {
+      const parsed = parseFloat(refIdValue)
+      if (Number.isNaN(parsed) || !Number.isFinite(parsed)) {
+        setEditUserError('ref_id має бути числом')
+        setEditUserLoading(false)
+        return
+      }
+      refIdNum = parsed
+    }
+
+    try {
+      const updateData: { type: string; ref_id?: number | null } = { type: editUserRole }
+      if (refIdValue) {
+        updateData.ref_id = refIdNum
+      } else {
+        updateData.ref_id = null
+      }
+
+      const { error } = await supabase
+        .from('spotlights_users')
+        .update(updateData)
+        .eq('email', editUserEmail)
+
+      if (error) throw error
+
+      setEditUserStatus('Користувача успішно оновлено.')
+      setEditUserLoading(false)
+      fetchUsers()
+
+      setTimeout(() => {
+        closeEditUserModal()
+      }, 1200)
+    } catch (err: any) {
+      console.error('Ошибка обновления пользователя', err)
+      setEditUserError(err.message || 'Не удалось обновить пользователя.')
+      setEditUserLoading(false)
+    }
+  }
+
   const formatDate = (value?: string | null) => {
     if (!value) return '—'
     try {
@@ -484,16 +579,26 @@ const AdminDashboard = () => {
                           <td className="admin-password-cell">{user.password ?? '—'}</td>
                           <td>{formatDate(user.created_at)}</td>
                           <td>
-                            {!isAdmin && (
+                            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                               <button
                                 type="button"
-                                className="admin-action-button"
-                                onClick={() => openMakeAdminModal(user.email)}
-                                title="Сделать админом"
+                                className="admin-action-button admin-action-button--edit"
+                                onClick={() => openEditUserModal(user.email)}
+                                title="Редагувати користувача"
                               >
-                                Сделать админом
+                                Редагувати
                               </button>
-                            )}
+                              {!isAdmin && (
+                                <button
+                                  type="button"
+                                  className="admin-action-button"
+                                  onClick={() => openMakeAdminModal(user.email)}
+                                  title="Сделать админом"
+                                >
+                                  Сделать админом
+                                </button>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       )
@@ -782,6 +887,59 @@ const AdminDashboard = () => {
                   {adminLoading ? 'Сохранение...' : 'Сохранить'}
                 </button>
               </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Модальное окно для редактирования пользователя */}
+      {editUserModalOpen && (
+        <div className="admin-modal-overlay" onClick={closeEditUserModal}>
+          <div className="admin-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="admin-modal-header">
+              <h2>Редагувати користувача</h2>
+              <button className="admin-modal-close" onClick={closeEditUserModal} type="button">
+                ×
+              </button>
+            </div>
+            <div className="admin-modal-body">
+              <p className="admin-modal-info">
+                Email: <strong>{editUserEmail}</strong>
+              </p>
+              {editUserLoading ? (
+                <div className="admin-loading">Загрузка...</div>
+              ) : (
+                <form className="balance-form" onSubmit={handleEditUser}>
+                  <label htmlFor="editUserRoleInput">Роль</label>
+                  <select
+                    id="editUserRoleInput"
+                    value={editUserRole}
+                    onChange={(event) => setEditUserRole(event.target.value)}
+                    disabled={editUserLoading}
+                  >
+                    <option value="user">user</option>
+                    <option value="admin">admin</option>
+                    <option value="superadmin">superadmin</option>
+                    <option value="hr">hr</option>
+                  </select>
+                  <label htmlFor="editUserRefIdInput">ref_id</label>
+                  <input
+                    id="editUserRefIdInput"
+                    type="number"
+                    step="1"
+                    inputMode="numeric"
+                    placeholder="Введите ref_id (необязательно)"
+                    value={editUserRefId}
+                    onChange={(event) => setEditUserRefId(event.target.value)}
+                    disabled={editUserLoading}
+                  />
+                  {editUserError && <p className="balance-error">{editUserError}</p>}
+                  {editUserStatus && <p className="balance-success">{editUserStatus}</p>}
+                  <button type="submit" className="balance-submit" disabled={editUserLoading}>
+                    {editUserLoading ? 'Збереження...' : 'Зберегти'}
+                  </button>
+                </form>
+              )}
             </div>
           </div>
         </div>
