@@ -40,6 +40,8 @@ function App() {
             <Route path="/admin/trading/messages/:toChatId" element={<MessagesChatPage />} />
             <Route path="/admin/trading/new-employee/:chatId" element={<NewEmployeeChatPage />} />
             <Route path="/admin/payments/users" element={<PaymentsUsersPage />} />
+            {/* Catch-all route to handle 404 on page refresh for any route */}
+            <Route path="*" element={<SpotlightCenter />} />
           </Routes>
         </main>
       </div>

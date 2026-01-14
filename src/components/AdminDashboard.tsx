@@ -588,16 +588,16 @@ const AdminDashboard = () => {
                               >
                                 Редагувати
                               </button>
-                              {!isAdmin && (
-                                <button
-                                  type="button"
-                                  className="admin-action-button"
-                                  onClick={() => openMakeAdminModal(user.email)}
-                                  title="Сделать админом"
-                                >
-                                  Сделать админом
-                                </button>
-                              )}
+                            {!isAdmin && (
+                              <button
+                                type="button"
+                                className="admin-action-button"
+                                onClick={() => openMakeAdminModal(user.email)}
+                                title="Сделать админом"
+                              >
+                                Сделать админом
+                              </button>
+                            )}
                             </div>
                           </td>
                         </tr>

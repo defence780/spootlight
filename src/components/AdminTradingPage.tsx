@@ -2652,7 +2652,7 @@ https://t.me/+faqFs28Xnx85Mjdi`
                         }
 
                         const isActive = trade.isActive === true || trade.isActive === 'true' || String(trade.isActive).toLowerCase() === 'true'
-                        
+
                         return (
                           <div key={trade.id} className="admin-trading-worker-card">
                             {Object.entries(trade).map(([key, value]) => {
