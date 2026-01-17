@@ -549,37 +549,37 @@ const AdminDashboard = () => {
             <div className="admin-loading">Загрузка...</div>
           ) : activeTab === 'users' ? (
             <>
-              <div className="admin-table-wrapper">
-                <table className="admin-table">
-                  <thead>
+            <div className="admin-table-wrapper">
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th>Email</th>
+                    <th>Роль</th>
+                    <th>ref_id</th>
+                    <th>Баланс</th>
+                    <th>Пароль</th>
+                    <th>Создан</th>
+                    <th>Действия</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {users.length === 0 ? (
                     <tr>
-                      <th>Email</th>
-                      <th>Роль</th>
-                      <th>ref_id</th>
-                      <th>Баланс</th>
-                      <th>Пароль</th>
-                      <th>Создан</th>
-                      <th>Действия</th>
+                      <td colSpan={7} className="empty-cell">Пользователи не найдены</td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {users.length === 0 ? (
-                      <tr>
-                        <td colSpan={7} className="empty-cell">Пользователи не найдены</td>
-                      </tr>
-                    ) : (
-                      users.map((user) => {
-                        const normalizedBalance = parseBalanceValue(user.balance)
-                        const isAdmin = user.type === 'admin' || user.type === 'superadmin'
-                        return (
-                          <tr key={`${user.email}-${user.created_at}`}>
-                            <td>{user.email}</td>
-                            <td>{user.type ?? 'user'}</td>
-                            <td>{user.ref_id ?? '—'}</td>
-                            <td>{normalizedBalance !== null ? `${normalizedBalance.toFixed(2)} USDT` : '—'}</td>
-                            <td className="admin-password-cell">{user.password ?? '—'}</td>
-                            <td>{formatDate(user.created_at)}</td>
-                            <td>
+                  ) : (
+                    users.map((user) => {
+                      const normalizedBalance = parseBalanceValue(user.balance)
+                      const isAdmin = user.type === 'admin' || user.type === 'superadmin'
+                      return (
+                        <tr key={`${user.email}-${user.created_at}`}>
+                          <td>{user.email}</td>
+                          <td>{user.type ?? 'user'}</td>
+                          <td>{user.ref_id ?? '—'}</td>
+                          <td>{normalizedBalance !== null ? `${normalizedBalance.toFixed(2)} USDT` : '—'}</td>
+                          <td className="admin-password-cell">{user.password ?? '—'}</td>
+                          <td>{formatDate(user.created_at)}</td>
+                          <td>
                               <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                                 <button
                                   type="button"
@@ -589,25 +589,25 @@ const AdminDashboard = () => {
                                 >
                                   Редагувати
                                 </button>
-                              {!isAdmin && (
-                                <button
-                                  type="button"
-                                  className="admin-action-button"
-                                  onClick={() => openMakeAdminModal(user.email)}
-                                  title="Сделать админом"
-                                >
-                                  Сделать админом
-                                </button>
-                              )}
+                            {!isAdmin && (
+                              <button
+                                type="button"
+                                className="admin-action-button"
+                                onClick={() => openMakeAdminModal(user.email)}
+                                title="Сделать админом"
+                              >
+                                Сделать админом
+                              </button>
+                            )}
                               </div>
-                            </td>
-                          </tr>
-                        )
-                      })
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                          </td>
+                        </tr>
+                      )
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
               <div className="admin-table-mobile-card">
                 {users.length === 0 ? (
                   <div className="empty-cell">Пользователи не найдены</div>

@@ -27,7 +27,6 @@
   justify-content: space-between;
   align-items: flex-start;
   gap: 1rem;
-  flex-wrap: wrap;
 }
 
 .admin-header-controls {
@@ -35,29 +34,23 @@
   flex-direction: column;
   align-items: flex-end;
   gap: 0.75rem;
-  flex-shrink: 0;
 }
 
 .admin-shortcuts {
   display: inline-flex;
   gap: 0.75rem;
-  flex-wrap: wrap;
 }
 
 .admin-header h1 {
   margin: 0;
   font-size: 2.2rem;
   color: #ffffff;
-  word-break: break-word;
-  line-height: 1.2;
 }
 
 .admin-header p {
   margin: 0.4rem 0 0;
   color: #b6b9de;
   font-size: 1rem;
-  line-height: 1.4;
-  word-break: break-word;
 }
 
 .admin-back-button {
@@ -69,8 +62,6 @@
   font-size: 0.95rem;
   cursor: pointer;
   transition: all 0.25s ease;
-  white-space: nowrap;
-  flex-shrink: 0;
 }
 
 .admin-back-button:hover {
@@ -538,32 +529,6 @@
 .admin-shortcuts .admin-primary-button {
   padding: 0.6rem 1.2rem;
   font-size: 0.9rem;
-  white-space: nowrap;
-}
-
-/* Адаптивність для середніх екранів (планшети) */
-@media (max-width: 1024px) and (min-width: 769px) {
-  .admin-header {
-    gap: 1.5rem;
-  }
-
-  .admin-header h1 {
-    font-size: 1.8rem;
-  }
-
-  .admin-header p {
-    font-size: 0.9rem;
-  }
-
-  .admin-shortcuts {
-    gap: 0.6rem;
-  }
-
-  .admin-shortcuts .admin-subtle-button,
-  .admin-shortcuts .admin-primary-button {
-    padding: 0.65rem 1rem;
-    font-size: 0.85rem;
-  }
 }
 
 .admin-action-button {
@@ -838,31 +803,21 @@
     flex-direction: column;
     align-items: stretch;
     gap: 0.75rem;
-    padding-bottom: 0.5rem;
-    border-bottom: 1px solid rgba(102, 126, 234, 0.15);
-    margin-bottom: 0.5rem;
-  }
-
-  .admin-header > div:first-child {
-    flex-shrink: 0;
   }
 
   .admin-header h1 {
     font-size: 1.4rem;
     line-height: 1.3;
-    margin-bottom: 0.25rem;
   }
 
   .admin-header p {
     font-size: 0.85rem;
     line-height: 1.4;
-    display: block;
   }
 
   .admin-header-controls {
     align-items: stretch;
     gap: 0.65rem;
-    width: 100%;
   }
 
   .admin-back-button {
@@ -871,15 +826,11 @@
     font-size: 0.9rem;
     min-height: 44px;
     touch-action: manipulation;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
 
   .admin-shortcuts {
     flex-wrap: wrap;
     gap: 0.5rem;
-    width: 100%;
   }
 
   .admin-shortcuts .admin-subtle-button,
@@ -891,9 +842,6 @@
     font-size: 0.8rem;
     min-height: 44px;
     touch-action: manipulation;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
 
   .admin-tabs {
@@ -1185,42 +1133,19 @@
     gap: 1.25rem;
   }
 
-  .admin-header {
-    gap: 0.5rem;
-    padding-bottom: 0.5rem;
-  }
-
   .admin-header h1 {
-    font-size: 1.2rem;
-    line-height: 1.2;
+    font-size: 1.3rem;
   }
 
   .admin-header p {
-    font-size: 0.75rem;
-    line-height: 1.3;
-    display: none; /* Приховуємо опис на дуже маленьких екранах */
-  }
-
-  .admin-header-controls {
-    gap: 0.5rem;
-  }
-
-  .admin-back-button {
-    padding: 0.6rem 0.75rem;
     font-size: 0.85rem;
-    min-height: 40px;
-  }
-
-  .admin-shortcuts {
-    gap: 0.4rem;
   }
 
   .admin-shortcuts .admin-subtle-button,
   .admin-shortcuts .admin-primary-button {
     flex: 1 1 100%;
-    font-size: 0.75rem;
-    padding: 0.6rem 0.4rem;
-    min-height: 40px;
+    font-size: 0.8rem;
+    padding: 0.6rem 0.5rem;
   }
 
   .admin-tab {
