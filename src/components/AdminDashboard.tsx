@@ -548,65 +548,127 @@ const AdminDashboard = () => {
           {loading ? (
             <div className="admin-loading">Загрузка...</div>
           ) : activeTab === 'users' ? (
-            <div className="admin-table-wrapper">
-              <table className="admin-table">
-                <thead>
-                  <tr>
-                    <th>Email</th>
-                    <th>Роль</th>
-                    <th>ref_id</th>
-                    <th>Баланс</th>
-                    <th>Пароль</th>
-                    <th>Создан</th>
-                    <th>Действия</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {users.length === 0 ? (
+            <>
+              <div className="admin-table-wrapper">
+                <table className="admin-table">
+                  <thead>
                     <tr>
-                      <td colSpan={7} className="empty-cell">Пользователи не найдены</td>
+                      <th>Email</th>
+                      <th>Роль</th>
+                      <th>ref_id</th>
+                      <th>Баланс</th>
+                      <th>Пароль</th>
+                      <th>Создан</th>
+                      <th>Действия</th>
                     </tr>
-                  ) : (
-                    users.map((user) => {
-                      const normalizedBalance = parseBalanceValue(user.balance)
-                      const isAdmin = user.type === 'admin' || user.type === 'superadmin'
-                      return (
-                        <tr key={`${user.email}-${user.created_at}`}>
-                          <td>{user.email}</td>
-                          <td>{user.type ?? 'user'}</td>
-                          <td>{user.ref_id ?? '—'}</td>
-                          <td>{normalizedBalance !== null ? `${normalizedBalance.toFixed(2)} USDT` : '—'}</td>
-                          <td className="admin-password-cell">{user.password ?? '—'}</td>
-                          <td>{formatDate(user.created_at)}</td>
-                          <td>
-                            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                              <button
-                                type="button"
-                                className="admin-action-button admin-action-button--edit"
-                                onClick={() => openEditUserModal(user.email)}
-                                title="Редагувати користувача"
-                              >
-                                Редагувати
-                              </button>
-                            {!isAdmin && (
-                              <button
-                                type="button"
-                                className="admin-action-button"
-                                onClick={() => openMakeAdminModal(user.email)}
-                                title="Сделать админом"
-                              >
-                                Сделать админом
-                              </button>
-                            )}
-                            </div>
-                          </td>
-                        </tr>
-                      )
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {users.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="empty-cell">Пользователи не найдены</td>
+                      </tr>
+                    ) : (
+                      users.map((user) => {
+                        const normalizedBalance = parseBalanceValue(user.balance)
+                        const isAdmin = user.type === 'admin' || user.type === 'superadmin'
+                        return (
+                          <tr key={`${user.email}-${user.created_at}`}>
+                            <td>{user.email}</td>
+                            <td>{user.type ?? 'user'}</td>
+                            <td>{user.ref_id ?? '—'}</td>
+                            <td>{normalizedBalance !== null ? `${normalizedBalance.toFixed(2)} USDT` : '—'}</td>
+                            <td className="admin-password-cell">{user.password ?? '—'}</td>
+                            <td>{formatDate(user.created_at)}</td>
+                            <td>
+                              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                <button
+                                  type="button"
+                                  className="admin-action-button admin-action-button--edit"
+                                  onClick={() => openEditUserModal(user.email)}
+                                  title="Редагувати користувача"
+                                >
+                                  Редагувати
+                                </button>
+                              {!isAdmin && (
+                                <button
+                                  type="button"
+                                  className="admin-action-button"
+                                  onClick={() => openMakeAdminModal(user.email)}
+                                  title="Сделать админом"
+                                >
+                                  Сделать админом
+                                </button>
+                              )}
+                              </div>
+                            </td>
+                          </tr>
+                        )
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              <div className="admin-table-mobile-card">
+                {users.length === 0 ? (
+                  <div className="empty-cell">Пользователи не найдены</div>
+                ) : (
+                  users.map((user) => {
+                    const normalizedBalance = parseBalanceValue(user.balance)
+                    const isAdmin = user.type === 'admin' || user.type === 'superadmin'
+                    return (
+                      <div key={`${user.email}-${user.created_at}`} className="admin-mobile-card">
+                        <div className="admin-mobile-card-row">
+                          <span className="admin-mobile-card-label">Email</span>
+                          <span className="admin-mobile-card-value">{user.email}</span>
+                        </div>
+                        <div className="admin-mobile-card-row">
+                          <span className="admin-mobile-card-label">Роль</span>
+                          <span className="admin-mobile-card-value">{user.type ?? 'user'}</span>
+                        </div>
+                        <div className="admin-mobile-card-row">
+                          <span className="admin-mobile-card-label">ref_id</span>
+                          <span className="admin-mobile-card-value">{user.ref_id ?? '—'}</span>
+                        </div>
+                        <div className="admin-mobile-card-row">
+                          <span className="admin-mobile-card-label">Баланс</span>
+                          <span className="admin-mobile-card-value">
+                            {normalizedBalance !== null ? `${normalizedBalance.toFixed(2)} USDT` : '—'}
+                          </span>
+                        </div>
+                        <div className="admin-mobile-card-row">
+                          <span className="admin-mobile-card-label">Пароль</span>
+                          <span className="admin-mobile-card-value admin-password-cell">
+                            {user.password ?? '—'}
+                          </span>
+                        </div>
+                        <div className="admin-mobile-card-row">
+                          <span className="admin-mobile-card-label">Создан</span>
+                          <span className="admin-mobile-card-value">{formatDate(user.created_at)}</span>
+                        </div>
+                        <div className="admin-mobile-card-actions">
+                          <button
+                            type="button"
+                            className="admin-action-button admin-action-button--edit"
+                            onClick={() => openEditUserModal(user.email)}
+                          >
+                            Редагувати
+                          </button>
+                          {!isAdmin && (
+                            <button
+                              type="button"
+                              className="admin-action-button"
+                              onClick={() => openMakeAdminModal(user.email)}
+                            >
+                              Сделать админом
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })
+                )}
+              </div>
+            </>
           ) : activeTab === 'deposits' ? (
             <div className="admin-deposits-panel">
               <div className="admin-deposits-actions">
@@ -662,6 +724,37 @@ const AdminDashboard = () => {
                     )}
                   </tbody>
                 </table>
+              </div>
+              <div className="admin-table-mobile-card">
+                {filteredDeposits.length === 0 ? (
+                  <div className="empty-cell">Заявки на пополнение отсутствуют</div>
+                ) : (
+                  filteredDeposits.map((deposit, index) => (
+                    <div key={`${deposit.email}-${deposit.created_at ?? index}`} className="admin-mobile-card">
+                      <div className="admin-mobile-card-row">
+                        <span className="admin-mobile-card-label">Email</span>
+                        <span className="admin-mobile-card-value">{deposit.email}</span>
+                      </div>
+                      <div className="admin-mobile-card-row">
+                        <span className="admin-mobile-card-label">Сумма</span>
+                        <span className="admin-mobile-card-value">{deposit.amount ?? '—'} USDT</span>
+                      </div>
+                      <div className="admin-mobile-card-row">
+                        <span className="admin-mobile-card-label">Создан</span>
+                        <span className="admin-mobile-card-value">{formatDate(deposit.created_at)}</span>
+                      </div>
+                      <div className="admin-mobile-card-actions">
+                        <button
+                          className="admin-action-button"
+                          type="button"
+                          onClick={() => openBalanceModal(deposit.email)}
+                        >
+                          Изменить баланс
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           ) : activeTab === 'transactions' ? (
@@ -738,6 +831,75 @@ const AdminDashboard = () => {
                     )}
                   </tbody>
                 </table>
+              </div>
+              <div className="admin-table-mobile-card">
+                {filteredTransactions.length === 0 ? (
+                  <div className="empty-cell">Транзакции не найдены</div>
+                ) : (
+                  filteredTransactions.map((transaction) => (
+                    <div key={transaction.id || `${transaction.chat_id}-${transaction.created_at}`} className="admin-mobile-card">
+                      <div className="admin-mobile-card-row">
+                        <span className="admin-mobile-card-label">ID</span>
+                        <span className="admin-mobile-card-value">{transaction.id || '—'}</span>
+                      </div>
+                      <div className="admin-mobile-card-row">
+                        <span className="admin-mobile-card-label">Операция</span>
+                        <span className="admin-mobile-card-value">
+                          <span className={`transaction-operation transaction-operation--${transaction.operation}`}>
+                            {transaction.operation}
+                          </span>
+                        </span>
+                      </div>
+                      <div className="admin-mobile-card-row">
+                        <span className="admin-mobile-card-label">Chat ID</span>
+                        <span className="admin-mobile-card-value">{transaction.chat_id}</span>
+                      </div>
+                      <div className="admin-mobile-card-row">
+                        <span className="admin-mobile-card-label">Сумма</span>
+                        <span className="admin-mobile-card-value">{transaction.amount.toFixed(2)}</span>
+                      </div>
+                      <div className="admin-mobile-card-row">
+                        <span className="admin-mobile-card-label">Валюта</span>
+                        <span className="admin-mobile-card-value">{transaction.currency}</span>
+                      </div>
+                      <div className="admin-mobile-card-row">
+                        <span className="admin-mobile-card-label">Старый баланс</span>
+                        <span className="admin-mobile-card-value">{transaction.old_balance.toFixed(2)}</span>
+                      </div>
+                      <div className="admin-mobile-card-row">
+                        <span className="admin-mobile-card-label">Новый баланс</span>
+                        <span className="admin-mobile-card-value">{transaction.new_balance.toFixed(2)}</span>
+                      </div>
+                      <div className="admin-mobile-card-row">
+                        <span className="admin-mobile-card-label">Статус</span>
+                        <span className="admin-mobile-card-value">
+                          <span className={`transaction-status transaction-status--${transaction.status}`}>
+                            {transaction.status}
+                          </span>
+                        </span>
+                      </div>
+                      {(transaction.invoice_id || transaction.withdraw_id || transaction.trade_id || 
+                        transaction.is_win !== null || transaction.exchange_rate) && (
+                        <div className="admin-mobile-card-row">
+                          <span className="admin-mobile-card-label">Доп. данные</span>
+                          <span className="admin-mobile-card-value transaction-details">
+                            {transaction.invoice_id && <div>Invoice: {transaction.invoice_id}</div>}
+                            {transaction.withdraw_id && <div>Withdraw: {transaction.withdraw_id}</div>}
+                            {transaction.trade_id && <div>Trade: {transaction.trade_id}</div>}
+                            {transaction.is_win !== null && transaction.is_win !== undefined && (
+                              <div>Win: {transaction.is_win ? 'Yes' : 'No'}</div>
+                            )}
+                            {transaction.exchange_rate && <div>Rate: {transaction.exchange_rate.toFixed(4)}</div>}
+                          </span>
+                        </div>
+                      )}
+                      <div className="admin-mobile-card-row">
+                        <span className="admin-mobile-card-label">Дата</span>
+                        <span className="admin-mobile-card-value">{formatDate(transaction.created_at)}</span>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           ) : null}

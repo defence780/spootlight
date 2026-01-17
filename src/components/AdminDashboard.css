@@ -1,8 +1,10 @@
 .admin-page {
   min-height: calc(100vh - 120px);
   display: flex;
+  flex-direction: column;
   justify-content: center;
   padding: 4rem 2rem;
+  gap: 2rem;
 }
 
 .admin-card {
@@ -25,6 +27,7 @@
   justify-content: space-between;
   align-items: flex-start;
   gap: 1rem;
+  flex-wrap: wrap;
 }
 
 .admin-header-controls {
@@ -32,23 +35,29 @@
   flex-direction: column;
   align-items: flex-end;
   gap: 0.75rem;
+  flex-shrink: 0;
 }
 
 .admin-shortcuts {
   display: inline-flex;
   gap: 0.75rem;
+  flex-wrap: wrap;
 }
 
 .admin-header h1 {
   margin: 0;
   font-size: 2.2rem;
   color: #ffffff;
+  word-break: break-word;
+  line-height: 1.2;
 }
 
 .admin-header p {
   margin: 0.4rem 0 0;
   color: #b6b9de;
   font-size: 1rem;
+  line-height: 1.4;
+  word-break: break-word;
 }
 
 .admin-back-button {
@@ -60,6 +69,8 @@
   font-size: 0.95rem;
   cursor: pointer;
   transition: all 0.25s ease;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .admin-back-button:hover {
@@ -119,6 +130,25 @@
   overflow-x: auto;
   overflow-y: visible;
   width: 100%;
+  position: relative;
+}
+
+.admin-table-wrapper::-webkit-scrollbar {
+  height: 8px;
+}
+
+.admin-table-wrapper::-webkit-scrollbar-track {
+  background: rgba(10, 10, 16, 0.5);
+  border-radius: 4px;
+}
+
+.admin-table-wrapper::-webkit-scrollbar-thumb {
+  background: rgba(102, 126, 234, 0.4);
+  border-radius: 4px;
+}
+
+.admin-table-wrapper::-webkit-scrollbar-thumb:hover {
+  background: rgba(102, 126, 234, 0.6);
 }
 
 .admin-table {
@@ -144,6 +174,97 @@
 
 .admin-table td:last-child {
   white-space: normal;
+}
+
+/* Картковий вигляд для мобільних */
+.admin-table-mobile-card {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .admin-page {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto;
+    gap: 0.75rem;
+    padding: 0.75rem 0.5rem;
+    align-items: start;
+  }
+
+  .admin-card {
+    grid-column: 1;
+    grid-row: 1;
+    max-height: calc(100vh - 200px);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .admin-positions {
+    grid-column: 2;
+    grid-row: 1;
+    max-height: calc(100vh - 200px);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .admin-table-wrapper {
+    display: none;
+  }
+
+  .admin-table-mobile-card {
+    display: block;
+  }
+
+  .admin-mobile-card {
+    background: rgba(10, 10, 16, 0.85);
+    border: 1px solid rgba(102, 126, 234, 0.2);
+    border-radius: 12px;
+    padding: 1rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .admin-mobile-card-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid rgba(102, 126, 234, 0.1);
+  }
+
+  .admin-mobile-card-row:last-child {
+    border-bottom: none;
+  }
+
+  .admin-mobile-card-label {
+    font-weight: 600;
+    color: #bfc2e7;
+    font-size: 0.85rem;
+    min-width: 100px;
+    flex-shrink: 0;
+  }
+
+  .admin-mobile-card-value {
+    color: #dfe2ff;
+    font-size: 0.9rem;
+    text-align: right;
+    flex: 1;
+    word-break: break-word;
+    overflow-wrap: break-word;
+  }
+
+  .admin-mobile-card-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid rgba(102, 126, 234, 0.15);
+  }
+
+  .admin-mobile-card-actions .admin-action-button {
+    width: 100%;
+    justify-content: center;
+  }
 }
 
 .admin-table tbody tr:hover {
@@ -417,6 +538,32 @@
 .admin-shortcuts .admin-primary-button {
   padding: 0.6rem 1.2rem;
   font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+/* Адаптивність для середніх екранів (планшети) */
+@media (max-width: 1024px) and (min-width: 769px) {
+  .admin-header {
+    gap: 1.5rem;
+  }
+
+  .admin-header h1 {
+    font-size: 1.8rem;
+  }
+
+  .admin-header p {
+    font-size: 0.9rem;
+  }
+
+  .admin-shortcuts {
+    gap: 0.6rem;
+  }
+
+  .admin-shortcuts .admin-subtle-button,
+  .admin-shortcuts .admin-primary-button {
+    padding: 0.65rem 1rem;
+    font-size: 0.85rem;
+  }
 }
 
 .admin-action-button {
@@ -682,47 +829,486 @@
 
 @media (max-width: 768px) {
   .admin-card {
-    padding: 2rem 1.5rem;
+    padding: 1rem 0.75rem;
+    gap: 1.25rem;
+    border-radius: 16px;
   }
 
   .admin-header {
     flex-direction: column;
     align-items: stretch;
+    gap: 0.75rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid rgba(102, 126, 234, 0.15);
+    margin-bottom: 0.5rem;
+  }
+
+  .admin-header > div:first-child {
+    flex-shrink: 0;
+  }
+
+  .admin-header h1 {
+    font-size: 1.4rem;
+    line-height: 1.3;
+    margin-bottom: 0.25rem;
+  }
+
+  .admin-header p {
+    font-size: 0.85rem;
+    line-height: 1.4;
+    display: block;
   }
 
   .admin-header-controls {
     align-items: stretch;
+    gap: 0.65rem;
+    width: 100%;
+  }
+
+  .admin-back-button {
+    width: 100%;
+    padding: 0.7rem 1rem;
+    font-size: 0.9rem;
+    min-height: 44px;
+    touch-action: manipulation;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .admin-shortcuts {
     flex-wrap: wrap;
+    gap: 0.5rem;
+    width: 100%;
   }
 
   .admin-shortcuts .admin-subtle-button,
   .admin-shortcuts .admin-primary-button {
-    flex: 1;
+    flex: 1 1 calc(50% - 0.25rem);
+    min-width: 0;
     text-align: center;
+    padding: 0.7rem 0.5rem;
+    font-size: 0.8rem;
+    min-height: 44px;
+    touch-action: manipulation;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .admin-tabs {
-    align-self: flex-start;
+    align-self: stretch;
+    border-radius: 12px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .admin-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .admin-tab {
+    padding: 0.7rem 1rem;
+    font-size: 0.85rem;
+    white-space: nowrap;
+    min-height: 44px;
+    touch-action: manipulation;
+    flex-shrink: 0;
+  }
+
+  .admin-content {
+    min-height: 200px;
   }
 
   .admin-deposits-actions {
     flex-direction: column;
     align-items: stretch;
+    gap: 0.75rem;
+  }
+
+  .admin-search {
+    width: 100%;
+    padding: 0.8rem 1rem;
+    font-size: 0.9rem;
+    min-height: 44px;
+    -webkit-appearance: none;
+    appearance: none;
   }
 
   .admin-deposits-buttons {
+    justify-content: stretch;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .admin-deposits-buttons .admin-subtle-button,
+  .admin-deposits-buttons .admin-primary-button {
+    flex: 1 1 calc(50% - 0.25rem);
+    min-width: 0;
+    padding: 0.75rem 0.75rem;
+    font-size: 0.85rem;
+    min-height: 44px;
+    touch-action: manipulation;
+  }
+
+  /* Приховуємо таблиці на мобільних */
+  .admin-table-wrapper {
+    display: none;
+  }
+
+  /* Показуємо картки */
+  .admin-table-mobile-card {
+    display: block;
+  }
+
+  .admin-mobile-card {
+    background: rgba(10, 10, 16, 0.85);
+    border: 1px solid rgba(102, 126, 234, 0.2);
+    border-radius: 12px;
+    padding: 1rem;
+    margin-bottom: 0.75rem;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+
+  .admin-mobile-card:active {
+    transform: scale(0.98);
+  }
+
+  .admin-mobile-card-row {
+    display: flex;
     justify-content: space-between;
+    align-items: flex-start;
+    padding: 0.6rem 0;
+    border-bottom: 1px solid rgba(102, 126, 234, 0.1);
+    gap: 0.75rem;
+  }
+
+  .admin-mobile-card-row:last-child {
+    border-bottom: none;
+  }
+
+  .admin-mobile-card-label {
+    font-weight: 600;
+    color: #bfc2e7;
+    font-size: 0.8rem;
+    min-width: 90px;
+    flex-shrink: 0;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+
+  .admin-mobile-card-value {
+    color: #dfe2ff;
+    font-size: 0.9rem;
+    text-align: right;
+    flex: 1;
+    word-break: break-word;
+    overflow-wrap: break-word;
+    line-height: 1.4;
+  }
+
+  .admin-mobile-card-value a {
+    color: #64b5f6;
+    text-decoration: none;
+  }
+
+  .admin-mobile-card-value a:hover {
+    text-decoration: underline;
+  }
+
+  .admin-mobile-card-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid rgba(102, 126, 234, 0.15);
+  }
+
+  .admin-mobile-card-actions .admin-action-button {
+    width: 100%;
+    justify-content: center;
+    min-height: 44px;
+    touch-action: manipulation;
   }
 
   .admin-table th,
   .admin-table td {
-    padding: 0.85rem;
+    padding: 0.75rem 0.5rem;
+    font-size: 0.85rem;
+  }
+
+  .admin-table th:first-child,
+  .admin-table td:first-child {
+    padding-left: 0.75rem;
+  }
+
+  .admin-table th:last-child,
+  .admin-table td:last-child {
+    padding-right: 0.75rem;
+  }
+
+  .admin-action-button {
+    padding: 0.4rem 0.75rem;
+    font-size: 0.8rem;
+    min-height: 36px;
+    touch-action: manipulation;
+  }
+
+  .admin-table td:last-child {
+    min-width: 140px;
+  }
+
+  .admin-table td:last-child > div {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+
+  .admin-table td:last-child .admin-action-button {
+    width: 100%;
   }
 
   .admin-positions {
-    padding: 1.5rem;
+    padding: 1rem 0.75rem;
+    gap: 1rem;
+  }
+
+  .admin-positions-header h2 {
+    font-size: 1.25rem;
+    line-height: 1.3;
+  }
+
+  .admin-positions-header p {
+    font-size: 0.8rem;
+    line-height: 1.4;
+  }
+
+  .admin-positions-grid {
+    grid-template-columns: 1fr;
+    gap: 0.9rem;
+  }
+
+  .admin-positions-grid--inactive {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-coin-card {
+    padding: 1rem;
+  }
+
+  .admin-positions-events {
+    padding: 1rem;
+  }
+
+  .admin-positions-events h3 {
+    font-size: 1.1rem;
+  }
+
+  .admin-positions-event-details {
+    flex-direction: column;
+    gap: 0.35rem;
+    font-size: 0.85rem;
+  }
+
+  .empty-cell {
+    padding: 2rem 1rem;
+    font-size: 0.9rem;
+  }
+
+  .balance-modal-overlay,
+  .admin-modal-overlay {
+    padding: 0.75rem;
+    align-items: flex-end;
+  }
+
+  .balance-modal,
+  .admin-modal {
+    padding: 1.25rem;
+    max-width: 100%;
+    border-radius: 20px 20px 0 0;
+    max-height: 90vh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .balance-modal-header h2,
+  .admin-modal-header h2 {
+    font-size: 1.2rem;
+    line-height: 1.3;
+  }
+
+  .balance-form {
+    gap: 0.75rem;
+  }
+
+  .balance-form input,
+  .balance-form select {
+    padding: 0.8rem;
+    font-size: 0.95rem;
+    min-height: 44px;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+
+  .balance-submit {
+    width: 100%;
+    padding: 0.85rem 1.5rem;
+    min-height: 44px;
+    touch-action: manipulation;
+  }
+}
+
+@media (max-width: 480px) {
+  .admin-page {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto;
+    padding: 0.5rem 0.5rem;
+  }
+
+  .admin-card {
+    grid-column: 1;
+    grid-row: 1;
+    max-height: none;
+  }
+
+  .admin-positions {
+    grid-column: 1;
+    grid-row: 2;
+    max-height: none;
+  }
+
+  .admin-card {
+    padding: 1rem 0.75rem;
+    gap: 1.25rem;
+  }
+
+  .admin-header {
+    gap: 0.5rem;
+    padding-bottom: 0.5rem;
+  }
+
+  .admin-header h1 {
+    font-size: 1.2rem;
+    line-height: 1.2;
+  }
+
+  .admin-header p {
+    font-size: 0.75rem;
+    line-height: 1.3;
+    display: none; /* Приховуємо опис на дуже маленьких екранах */
+  }
+
+  .admin-header-controls {
+    gap: 0.5rem;
+  }
+
+  .admin-back-button {
+    padding: 0.6rem 0.75rem;
+    font-size: 0.85rem;
+    min-height: 40px;
+  }
+
+  .admin-shortcuts {
+    gap: 0.4rem;
+  }
+
+  .admin-shortcuts .admin-subtle-button,
+  .admin-shortcuts .admin-primary-button {
+    flex: 1 1 100%;
+    font-size: 0.75rem;
+    padding: 0.6rem 0.4rem;
+    min-height: 40px;
+  }
+
+  .admin-tab {
+    padding: 0.6rem 1rem;
+    font-size: 0.8rem;
+  }
+
+  .admin-table {
+    min-width: 700px;
+    font-size: 0.8rem;
+  }
+
+  .admin-table th,
+  .admin-table td {
+    padding: 0.65rem 0.4rem;
+    font-size: 0.8rem;
+  }
+
+  .admin-action-button {
+    padding: 0.35rem 0.6rem;
+    font-size: 0.75rem;
+    min-height: 32px;
+  }
+
+  .admin-positions {
+    padding: 1rem 0.75rem;
+  }
+
+  .admin-positions-header h2 {
+    font-size: 1.15rem;
+  }
+
+  .balance-modal,
+  .admin-modal {
+    padding: 1.25rem;
+  }
+
+  .balance-modal-header h2,
+  .admin-modal-header h2 {
+    font-size: 1.15rem;
+  }
+
+  .admin-table td:last-child > div {
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+
+  .admin-table td:last-child .admin-action-button {
+    width: 100%;
+    font-size: 0.75rem;
+    padding: 0.35rem 0.5rem;
+  }
+}
+
+/* Додаткові стилі для кращої читабельності на мобільних */
+@media (max-width: 768px) {
+  .admin-table thead {
+    position: sticky;
+    left: 0;
+    z-index: 10;
+  }
+
+  .admin-table tbody tr {
+    border-bottom: 2px solid rgba(102, 126, 234, 0.2);
+  }
+
+  .admin-table tbody tr:last-child {
+    border-bottom: none;
+  }
+
+  /* Покращення для довгих email */
+  .admin-mobile-card-value {
+    hyphens: auto;
+    -webkit-hyphens: auto;
+    -moz-hyphens: auto;
+  }
+
+  /* Покращення для паролів */
+  .admin-mobile-card .admin-password-cell {
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 0.85rem;
+    word-break: break-all;
+  }
+
+  /* Покращення для transaction badges */
+  .admin-mobile-card .transaction-operation,
+  .admin-mobile-card .transaction-status {
+    display: inline-block;
+    margin-top: 0.25rem;
   }
 }
