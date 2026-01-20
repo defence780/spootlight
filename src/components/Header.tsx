@@ -431,7 +431,7 @@ const Header = () => {
             </button>
           </>
         )}
-        {currentUserEmail && (
+        {currentUserEmail && !(currentUserType === 'admin' || currentUserType === 'superadmin' || currentUserType === 'hr') && (
           <div className="balance-card">
             <div className="balance-info">
               <span className="balance-label">Баланс</span>

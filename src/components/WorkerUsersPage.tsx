@@ -91,6 +91,8 @@ const WorkerUsersPage = () => {
   const [updatingAutoWin, setUpdatingAutoWin] = useState<number | null>(null)
   const [sendingVerification, setSendingVerification] = useState<number | null>(null)
   const [searchQuery, setSearchQuery] = useState<string>('')
+  const [confirmSendTPModalOpen, setConfirmSendTPModalOpen] = useState(false)
+  const [pendingTPUser, setPendingTPUser] = useState<{ userId: number; chatId: string | number } | null>(null)
   const fromTab = (location.state as { fromTab?: string } | null)?.fromTab
 
   useEffect(() => {
@@ -696,6 +698,8 @@ const WorkerUsersPage = () => {
     setSendingVerification(userId)
     setError(null)
     setSuccessMessage(null)
+    setConfirmSendTPModalOpen(false)
+    setPendingTPUser(null)
 
     try {
       const { error } = await supabase.functions.invoke('logic', {
@@ -721,6 +725,17 @@ const WorkerUsersPage = () => {
     } finally {
       setSendingVerification(null)
     }
+  }
+
+  const handleConfirmSendTP = () => {
+    if (pendingTPUser && chatId) {
+      sendVerification(pendingTPUser.userId, pendingTPUser.chatId, chatId)
+    }
+  }
+
+  const handleCancelSendTP = () => {
+    setConfirmSendTPModalOpen(false)
+    setPendingTPUser(null)
   }
 
   useEffect(() => {
@@ -1051,7 +1066,8 @@ const WorkerUsersPage = () => {
                         className="worker-users-action-btn worker-users-action-btn--primary"
                         onClick={() => {
                           if (user.chat_id && chatId) {
-                            sendVerification(user.id, user.chat_id, chatId)
+                            setPendingTPUser({ userId: user.id, chatId: user.chat_id })
+                            setConfirmSendTPModalOpen(true)
                           }
                         }}
                         disabled={sendingVerification === user.id}
@@ -1463,6 +1479,42 @@ const WorkerUsersPage = () => {
           )}
         </div>
       </div>
+
+      {/* Модальне вікно підтвердження відправки ТП */}
+      {confirmSendTPModalOpen && (
+        <div className="worker-users-modal-overlay" onClick={handleCancelSendTP}>
+          <div className="worker-users-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="worker-users-modal-header">
+              <h2>Підтвердження відправки ТП</h2>
+              <button className="worker-users-modal-close" onClick={handleCancelSendTP} type="button">
+                ×
+              </button>
+            </div>
+            <div className="worker-users-modal-body">
+              <p className="worker-users-modal-message">
+                Ви впевнені, що хочете відправити ТП?
+              </p>
+              <div className="worker-users-modal-actions">
+                <button
+                  className="worker-users-modal-btn worker-users-modal-btn--cancel"
+                  onClick={handleCancelSendTP}
+                  type="button"
+                >
+                  Скасувати
+                </button>
+                <button
+                  className="worker-users-modal-btn worker-users-modal-btn--confirm"
+                  onClick={handleConfirmSendTP}
+                  type="button"
+                  disabled={sendingVerification === pendingTPUser?.userId}
+                >
+                  {sendingVerification === pendingTPUser?.userId ? 'Відправка...' : 'Підтвердити'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
