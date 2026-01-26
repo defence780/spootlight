@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import './AdminDashboard.css'
 import { generateCoinSchedule } from '../lib/coinSchedule'
-import { Eye, EyeOff, Copy } from 'lucide-react'
 import './AdminDashboard.css'
 
 const STORAGE_KEY = 'spotlight_user'
@@ -84,13 +83,6 @@ const AdminDashboard = () => {
   const [adminCodeStatus, setAdminCodeStatus] = useState('')
   const [editCodeModalOpen, setEditCodeModalOpen] = useState(false)
   const [editCodeInput, setEditCodeInput] = useState('')
-  const [isCodeVisible, setIsCodeVisible] = useState(false)
-  const [addToCloserModalOpen, setAddToCloserModalOpen] = useState(false)
-  const [addToCloserChatId, setAddToCloserChatId] = useState('')
-  const [addToCloserError, setAddToCloserError] = useState('')
-  const [addToCloserStatus, setAddToCloserStatus] = useState('')
-  const [addToCloserLoading, setAddToCloserLoading] = useState(false)
-  const [currentSuperAdminRefId, setCurrentSuperAdminRefId] = useState<number | null>(null)
   const coinSchedule = useMemo(() => generateCoinSchedule({ eventCount: 30 }), [])
 
   const parseBalanceValue = (value: unknown): number | null => {
@@ -125,17 +117,6 @@ const AdminDashboard = () => {
             if (parsed?.type === 'superadmin') {
               setIsSuperAdmin(true)
               setCurrentUser(parsed)
-              // Отримуємо ref_id superadmin для додавання користувачів до клоузера
-              const { data: superAdminData } = await supabase
-                .from('spotlights_users')
-                .select('ref_id')
-                .eq('type', 'superadmin')
-                .eq('email', parsed?.email || '')
-                .maybeSingle()
-              
-              if (superAdminData?.ref_id) {
-                setCurrentSuperAdminRefId(Number(superAdminData.ref_id))
-              }
               return
             }
 
@@ -605,84 +586,6 @@ const AdminDashboard = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSuperAdmin])
 
-  // Open add to closer modal
-  const openAddToCloserModal = () => {
-    setAddToCloserChatId('')
-    setAddToCloserError('')
-    setAddToCloserStatus('')
-    setAddToCloserModalOpen(true)
-  }
-
-  // Close add to closer modal
-  const closeAddToCloserModal = () => {
-    setAddToCloserModalOpen(false)
-    setAddToCloserChatId('')
-    setAddToCloserError('')
-    setAddToCloserStatus('')
-  }
-
-  // Handle add user to closer
-  const handleAddToCloser = async (event: FormEvent) => {
-    event.preventDefault()
-    
-    if (!currentSuperAdminRefId) {
-      setAddToCloserError('Не вдалося отримати ref_id superadmin')
-      return
-    }
-
-    const chatIdValue = addToCloserChatId.trim()
-    if (!chatIdValue) {
-      setAddToCloserError('Введіть chat_id користувача')
-      return
-    }
-
-    const chatIdNum = parseFloat(chatIdValue)
-    if (Number.isNaN(chatIdNum) || !Number.isFinite(chatIdNum)) {
-      setAddToCloserError('chat_id має бути числом')
-      return
-    }
-
-    setAddToCloserError('')
-    setAddToCloserStatus('')
-    setAddToCloserLoading(true)
-
-    try {
-      // Спочатку перевіряємо, чи існує користувач з таким chat_id
-      const { data: userData, error: userError } = await supabase
-        .from('users')
-        .select('id, chat_id, ref_id')
-        .eq('chat_id', chatIdNum)
-        .maybeSingle()
-
-      if (userError) throw userError
-
-      if (!userData) {
-        setAddToCloserError('Користувача з таким chat_id не знайдено')
-        setAddToCloserLoading(false)
-        return
-      }
-
-      // Оновлюємо ref_id користувача на ref_id superadmin (chat_id воркера)
-      const { error: updateError } = await supabase
-        .from('users')
-        .update({ ref_id: currentSuperAdminRefId })
-        .eq('chat_id', chatIdNum)
-
-      if (updateError) throw updateError
-
-      setAddToCloserStatus('Користувача успішно додано до клоузера.')
-      setAddToCloserLoading(false)
-
-      setTimeout(() => {
-        closeAddToCloserModal()
-      }, 1200)
-    } catch (err: any) {
-      console.error('Помилка додавання користувача до клоузера', err)
-      setAddToCloserError(err.message || 'Не вдалося додати користувача до клоузера.')
-      setAddToCloserLoading(false)
-    }
-  }
-
   return (
     <div className="admin-page">
       <div className="admin-card">
@@ -711,36 +614,13 @@ const AdminDashboard = () => {
         </div>
 
         <div className="admin-tabs">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <button
-              className={`admin-tab ${activeTab === 'users' ? 'active' : ''}`}
-              onClick={() => setActiveTab('users')}
-              type="button"
-            >
-              Пользователи
-            </button>
-            {isSuperAdmin && activeTab === 'users' && (
-              <button
-                className="admin-action-button"
-                onClick={openAddToCloserModal}
-                type="button"
-                title="Додати користувача до клоузера"
-                style={{
-                  padding: '0.5rem',
-                  minWidth: 'auto',
-                  width: '32px',
-                  height: '32px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '18px',
-                  fontWeight: 'bold'
-                }}
-              >
-                +
-              </button>
-            )}
-          </div>
+          <button
+            className={`admin-tab ${activeTab === 'users' ? 'active' : ''}`}
+            onClick={() => setActiveTab('users')}
+            type="button"
+          >
+            Пользователи
+          </button>
           <button
             className={`admin-tab ${activeTab === 'deposits' ? 'active' : ''}`}
             onClick={() => setActiveTab('deposits')}
@@ -785,92 +665,19 @@ const AdminDashboard = () => {
               <div style={{ color: 'var(--text-color-secondary, #999)' }}>Загрузка...</div>
             ) : (
               <div style={{ 
-                display: 'flex',
-                alignItems: 'center',
-                gap: '10px',
                 padding: '10px', 
                 background: 'var(--background, #0a0a0a)', 
                 borderRadius: '4px',
+                fontFamily: 'monospace',
+                fontSize: '14px',
+                wordBreak: 'break-all',
+                color: 'var(--text-color, #fff)'
               }}>
-                <div style={{ 
-                  flex: 1,
-                  fontFamily: 'monospace',
-                  fontSize: '14px',
-                  wordBreak: 'break-all',
-                  color: 'var(--text-color, #fff)',
-                  minHeight: '20px'
-                }}>
-                  {adminCode ? (isCodeVisible ? adminCode : '•'.repeat(adminCode.length)) : '—'}
-                </div>
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                  <button
-                    type="button"
-                    onClick={() => setIsCodeVisible(!isCodeVisible)}
-                    style={{
-                      background: 'transparent',
-                      border: 'none',
-                      cursor: 'pointer',
-                      padding: '4px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: 'var(--text-color, #fff)',
-                      transition: 'opacity 0.2s'
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.opacity = '0.7'
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.opacity = '1'
-                    }}
-                    title={isCodeVisible ? 'Приховати код' : 'Показати код'}
-                  >
-                    {isCodeVisible ? <EyeOff size={18} /> : <Eye size={18} />}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      if (adminCode) {
-                        try {
-                          await navigator.clipboard.writeText(adminCode)
-                          setAdminCodeStatus('Код скопійовано!')
-                          setTimeout(() => setAdminCodeStatus(''), 2000)
-                        } catch (err) {
-                          console.error('Помилка копіювання:', err)
-                          setAdminCodeError('Не вдалося скопіювати код')
-                          setTimeout(() => setAdminCodeError(''), 2000)
-                        }
-                      }
-                    }}
-                    style={{
-                      background: 'transparent',
-                      border: 'none',
-                      cursor: 'pointer',
-                      padding: '4px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: 'var(--text-color, #fff)',
-                      transition: 'opacity 0.2s'
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.opacity = '0.7'
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.opacity = '1'
-                    }}
-                    title="Скопіювати код"
-                  >
-                    <Copy size={18} />
-                  </button>
-                </div>
+                {adminCode || '—'}
               </div>
             )}
             {adminCodeError && (
               <div style={{ marginTop: '10px', color: '#ff4444', fontSize: '14px' }}>{adminCodeError}</div>
-            )}
-            {adminCodeStatus && (
-              <div style={{ marginTop: '10px', color: '#4caf50', fontSize: '14px' }}>{adminCodeStatus}</div>
             )}
           </div>
         )}
@@ -1465,43 +1272,6 @@ const AdminDashboard = () => {
                 {adminCodeStatus && <p className="balance-success">{adminCodeStatus}</p>}
                 <button type="submit" className="balance-submit" disabled={adminCodeLoading}>
                   {adminCodeLoading ? 'Збереження...' : 'Зберегти'}
-                </button>
-              </form>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Модальное окно для додавання користувача до клоузера */}
-      {addToCloserModalOpen && (
-        <div className="admin-modal-overlay" onClick={closeAddToCloserModal}>
-          <div className="admin-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="admin-modal-header">
-              <h2>Додати користувача до клоузера</h2>
-              <button className="admin-modal-close" onClick={closeAddToCloserModal} type="button">
-                ×
-              </button>
-            </div>
-            <div className="admin-modal-body">
-              <form className="balance-form" onSubmit={handleAddToCloser}>
-                <label htmlFor="addToCloserChatIdInput">
-                  Chat ID користувача <span style={{ color: 'red' }}>*</span>
-                </label>
-                <input
-                  id="addToCloserChatIdInput"
-                  type="number"
-                  step="1"
-                  inputMode="numeric"
-                  placeholder="Введіть chat_id користувача"
-                  value={addToCloserChatId}
-                  onChange={(event) => setAddToCloserChatId(event.target.value)}
-                  disabled={addToCloserLoading}
-                  required
-                />
-                {addToCloserError && <p className="balance-error">{addToCloserError}</p>}
-                {addToCloserStatus && <p className="balance-success">{addToCloserStatus}</p>}
-                <button type="submit" className="balance-submit" disabled={addToCloserLoading}>
-                  {addToCloserLoading ? 'Збереження...' : 'Додати'}
                 </button>
               </form>
             </div>

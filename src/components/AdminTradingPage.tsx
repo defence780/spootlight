@@ -151,6 +151,12 @@ const AdminTradingPage = () => {
   const [leads, setLeads] = useState<WorkerLead[]>([])
   const [loadingReports, setLoadingReports] = useState(false)
   const [loadingLeads, setLoadingLeads] = useState(false)
+  const [addUserModalOpen, setAddUserModalOpen] = useState(false)
+  const [selectedWorkerChatId, setSelectedWorkerChatId] = useState<number | null>(null)
+  const [userChatIdInput, setUserChatIdInput] = useState('')
+  const [addUserError, setAddUserError] = useState('')
+  const [addUserStatus, setAddUserStatus] = useState('')
+  const [addUserLoading, setAddUserLoading] = useState(false)
   const itemsPerPage = 10
 
   useEffect(() => {
@@ -557,6 +563,84 @@ const AdminTradingPage = () => {
     await fetchLeads(closerChatId, status)
   }
 
+  const openAddUserModal = (workerChatId: number) => {
+    setSelectedWorkerChatId(workerChatId)
+    setUserChatIdInput('')
+    setAddUserError('')
+    setAddUserStatus('')
+    setAddUserModalOpen(true)
+  }
+
+  const closeAddUserModal = () => {
+    setAddUserModalOpen(false)
+    setSelectedWorkerChatId(null)
+    setUserChatIdInput('')
+    setAddUserError('')
+    setAddUserStatus('')
+    setAddUserLoading(false)
+  }
+
+  const handleAddUserToCloser = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!selectedWorkerChatId) return
+
+    setAddUserError('')
+    setAddUserStatus('')
+    setAddUserLoading(true)
+
+    const chatIdValue = userChatIdInput.trim()
+    if (!chatIdValue) {
+      setAddUserError('Введіть chat_id користувача')
+      setAddUserLoading(false)
+      return
+    }
+
+    const chatIdNum = parseFloat(chatIdValue)
+    if (Number.isNaN(chatIdNum) || !Number.isFinite(chatIdNum)) {
+      setAddUserError('chat_id має бути числом')
+      setAddUserLoading(false)
+      return
+    }
+
+    try {
+      // Шукаємо користувача по chat_id
+      const { data: user, error: findError } = await supabase
+        .from('users')
+        .select('id, chat_id, first_name, username, ref_id')
+        .eq('chat_id', chatIdNum)
+        .maybeSingle()
+
+      if (findError) throw findError
+
+      if (!user) {
+        setAddUserError('Користувача з таким chat_id не знайдено')
+        setAddUserLoading(false)
+        return
+      }
+
+      // Оновлюємо ref_id користувача на chat_id клоузера
+      const { error: updateError } = await supabase
+        .from('users')
+        .update({ ref_id: selectedWorkerChatId })
+        .eq('chat_id', chatIdNum)
+
+      if (updateError) throw updateError
+
+      setAddUserStatus('Користувача успішно додано до клоузера')
+      setAddUserLoading(false)
+
+      // Оновлюємо список воркерів
+      await fetchWorkers()
+
+      setTimeout(() => {
+        closeAddUserModal()
+      }, 1500)
+    } catch (err: any) {
+      console.error('Помилка додавання користувача до клоузера', err)
+      setAddUserError(err.message || 'Не вдалося додати користувача до клоузера')
+      setAddUserLoading(false)
+    }
+  }
 
   const fetchWithdrawals = async () => {
     setLoading(true)
@@ -1809,7 +1893,7 @@ https://t.me/+faqFs28Xnx85Mjdi`
                           </div>
                           <div className="admin-trading-worker-card-section">
                             <span className="admin-trading-worker-card-label">Кількість користувачів</span>
-                            <div className="admin-trading-users-count-wrapper">
+                            <div className="admin-trading-users-count-wrapper" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                               {worker.chat_id ? (
                                 <>
                                   <button
@@ -1819,6 +1903,30 @@ https://t.me/+faqFs28Xnx85Mjdi`
                                   >
                                     {worker.usersCount ?? 0}
                                   </button>
+                                  {isSuperAdmin && (
+                                    <button
+                                      className="admin-trading-add-user-btn"
+                                      onClick={() => openAddUserModal(Number(worker.chat_id))}
+                                      title="Додати користувача до клоузера"
+                                      style={{
+                                        background: '#4CAF50',
+                                        color: 'white',
+                                        border: 'none',
+                                        borderRadius: '4px',
+                                        width: '28px',
+                                        height: '28px',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        cursor: 'pointer',
+                                        fontSize: '18px',
+                                        fontWeight: 'bold',
+                                        padding: 0
+                                      }}
+                                    >
+                                      +
+                                    </button>
+                                  )}
                                 </>
                               ) : (
                                 <span className="admin-trading-worker-card-value">0</span>
@@ -3659,6 +3767,44 @@ https://t.me/+faqFs28Xnx85Mjdi`
                   : editingPayment
                     ? 'Сохранить'
                     : 'Создать'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Модалка для додавання користувача до клоузера */}
+      {addUserModalOpen && selectedWorkerChatId && (
+        <div className="admin-trading-modal-overlay" onClick={closeAddUserModal}>
+          <div className="admin-trading-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="admin-trading-modal-header">
+              <h2>Додати користувача до клоузера</h2>
+              <button className="admin-trading-modal-close" type="button" onClick={closeAddUserModal}>
+                ×
+              </button>
+            </div>
+            <form className="admin-trading-payment-form" onSubmit={handleAddUserToCloser}>
+              <div className="admin-trading-form-field">
+                <label htmlFor="userChatId">Chat ID користувача *</label>
+                <input
+                  id="userChatId"
+                  type="number"
+                  step="1"
+                  inputMode="numeric"
+                  placeholder="Введіть chat_id користувача"
+                  value={userChatIdInput}
+                  onChange={(e) => setUserChatIdInput(e.target.value)}
+                  disabled={addUserLoading}
+                  required
+                />
+                <p style={{ marginTop: '8px', fontSize: '12px', color: '#999' }}>
+                  Користувач буде знайдений по chat_id, і його ref_id буде оновлено на chat_id клоузера
+                </p>
+              </div>
+              {addUserError && <div className="admin-trading-form-error">{addUserError}</div>}
+              {addUserStatus && <div className="admin-trading-form-success" style={{ color: '#4CAF50', marginTop: '10px' }}>{addUserStatus}</div>}
+              <button type="submit" className="admin-trading-form-submit" disabled={addUserLoading}>
+                {addUserLoading ? 'Додавання...' : 'Додати'}
               </button>
             </form>
           </div>
