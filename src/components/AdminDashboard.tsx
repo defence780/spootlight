@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import './AdminDashboard.css'
 import { generateCoinSchedule } from '../lib/coinSchedule'
+import { Copy, Eye, EyeOff } from 'lucide-react'
 import './AdminDashboard.css'
 
 const STORAGE_KEY = 'spotlight_user'
@@ -83,6 +84,8 @@ const AdminDashboard = () => {
   const [adminCodeStatus, setAdminCodeStatus] = useState('')
   const [editCodeModalOpen, setEditCodeModalOpen] = useState(false)
   const [editCodeInput, setEditCodeInput] = useState('')
+  const [adminCodeVisible, setAdminCodeVisible] = useState(false)
+  const [copySuccess, setCopySuccess] = useState(false)
   const coinSchedule = useMemo(() => generateCoinSchedule({ eventCount: 30 }), [])
 
   const parseBalanceValue = (value: unknown): number | null => {
@@ -578,6 +581,38 @@ const AdminDashboard = () => {
     }
   }
 
+  // Copy admin code to clipboard
+  const handleCopyCode = async () => {
+    if (!adminCode) return
+    
+    try {
+      await navigator.clipboard.writeText(adminCode)
+      setCopySuccess(true)
+      setTimeout(() => {
+        setCopySuccess(false)
+      }, 2000)
+    } catch (err) {
+      console.error('Помилка копіювання коду', err)
+      // Fallback для старих браузерів
+      const textArea = document.createElement('textarea')
+      textArea.value = adminCode
+      textArea.style.position = 'fixed'
+      textArea.style.opacity = '0'
+      document.body.appendChild(textArea)
+      textArea.select()
+      try {
+        document.execCommand('copy')
+        setCopySuccess(true)
+        setTimeout(() => {
+          setCopySuccess(false)
+        }, 2000)
+      } catch (fallbackErr) {
+        console.error('Помилка копіювання (fallback)', fallbackErr)
+      }
+      document.body.removeChild(textArea)
+    }
+  }
+
   // Fetch admin code when superadmin is loaded
   useEffect(() => {
     if (isSuperAdmin) {
@@ -671,9 +706,69 @@ const AdminDashboard = () => {
                 fontFamily: 'monospace',
                 fontSize: '14px',
                 wordBreak: 'break-all',
-                color: 'var(--text-color, #fff)'
+                color: 'var(--text-color, #fff)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '10px'
               }}>
-                {adminCode || '—'}
+                <span style={{ flex: 1 }}>
+                  {adminCodeVisible ? (adminCode || '—') : (adminCode ? '•'.repeat(adminCode.length) : '—')}
+                </span>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <button
+                    type="button"
+                    onClick={() => setAdminCodeVisible(!adminCodeVisible)}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: 'var(--text-color, #fff)',
+                      cursor: 'pointer',
+                      padding: '4px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderRadius: '4px',
+                      transition: 'background-color 0.2s'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.1)'
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = 'transparent'
+                    }}
+                    title={adminCodeVisible ? 'Приховати код' : 'Показати код'}
+                  >
+                    {adminCodeVisible ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCopyCode}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: copySuccess ? '#4CAF50' : 'var(--text-color, #fff)',
+                      cursor: 'pointer',
+                      padding: '4px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderRadius: '4px',
+                      transition: 'background-color 0.2s, color 0.2s'
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!copySuccess) {
+                        e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.1)'
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = 'transparent'
+                    }}
+                    title={copySuccess ? 'Скопійовано!' : 'Копіювати код'}
+                  >
+                    <Copy size={18} />
+                  </button>
+                </div>
               </div>
             )}
             {adminCodeError && (
