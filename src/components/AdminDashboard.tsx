@@ -77,6 +77,12 @@ const AdminDashboard = () => {
   const [editUserError, setEditUserError] = useState('')
   const [editUserStatus, setEditUserStatus] = useState('')
   const [editUserLoading, setEditUserLoading] = useState(false)
+  const [adminCode, setAdminCode] = useState<string>('')
+  const [adminCodeLoading, setAdminCodeLoading] = useState(false)
+  const [adminCodeError, setAdminCodeError] = useState('')
+  const [adminCodeStatus, setAdminCodeStatus] = useState('')
+  const [editCodeModalOpen, setEditCodeModalOpen] = useState(false)
+  const [editCodeInput, setEditCodeInput] = useState('')
   const coinSchedule = useMemo(() => generateCoinSchedule({ eventCount: 30 }), [])
 
   const parseBalanceValue = (value: unknown): number | null => {
@@ -489,6 +495,97 @@ const AdminDashboard = () => {
     }
   }
 
+  // Fetch admin code
+  const fetchAdminCode = async () => {
+    if (!isSuperAdmin) return
+    
+    setAdminCodeLoading(true)
+    setAdminCodeError('')
+    try {
+      const { data, error } = await supabase
+        .from('spotlights_settings')
+        .select('setting_value')
+        .eq('setting_key', 'admin_code')
+        .maybeSingle()
+
+      if (error) throw error
+      if (data) {
+        setAdminCode(data.setting_value)
+      } else {
+        setAdminCode('')
+      }
+    } catch (err: any) {
+      console.error('Ошибка загрузки кода', err)
+      setAdminCodeError(err.message || 'Не удалось загрузить код')
+    } finally {
+      setAdminCodeLoading(false)
+    }
+  }
+
+  // Open edit code modal
+  const openEditCodeModal = () => {
+    setEditCodeInput(adminCode)
+    setEditCodeModalOpen(true)
+    setAdminCodeError('')
+    setAdminCodeStatus('')
+  }
+
+  // Close edit code modal
+  const closeEditCodeModal = () => {
+    setEditCodeModalOpen(false)
+    setEditCodeInput('')
+    setAdminCodeError('')
+    setAdminCodeStatus('')
+  }
+
+  // Update admin code
+  const handleUpdateCode = async (event: FormEvent) => {
+    event.preventDefault()
+    
+    if (!editCodeInput.trim()) {
+      setAdminCodeError('Код не может быть пустым')
+      return
+    }
+
+    setAdminCodeError('')
+    setAdminCodeStatus('')
+    setAdminCodeLoading(true)
+
+    try {
+      const { error } = await supabase
+        .from('spotlights_settings')
+        .upsert({
+          setting_key: 'admin_code',
+          setting_value: editCodeInput.trim(),
+          description: 'Admin code that can be changed by superadmin'
+        }, {
+          onConflict: 'setting_key'
+        })
+
+      if (error) throw error
+
+      setAdminCodeStatus('Код успешно обновлен')
+      setAdminCode(editCodeInput.trim())
+      setAdminCodeLoading(false)
+
+      setTimeout(() => {
+        closeEditCodeModal()
+      }, 1200)
+    } catch (err: any) {
+      console.error('Ошибка обновления кода', err)
+      setAdminCodeError(err.message || 'Не удалось обновить код')
+      setAdminCodeLoading(false)
+    }
+  }
+
+  // Fetch admin code when superadmin is loaded
+  useEffect(() => {
+    if (isSuperAdmin) {
+      fetchAdminCode()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSuperAdmin])
+
   return (
     <div className="admin-page">
       <div className="admin-card">
@@ -543,6 +640,47 @@ const AdminDashboard = () => {
         </div>
 
         {error && <div className="admin-error">{error}</div>}
+
+        {/* Admin Code Section - Only for SuperAdmin */}
+        {isSuperAdmin && (
+          <div style={{ 
+            marginBottom: '20px', 
+            padding: '15px', 
+            background: 'var(--card-background, #1a1a1a)', 
+            borderRadius: '8px',
+            border: '1px solid var(--border-color, #333)'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '600' }}>Admin Code</h3>
+              <button
+                type="button"
+                className="admin-action-button admin-action-button--edit"
+                onClick={openEditCodeModal}
+                disabled={adminCodeLoading}
+              >
+                Редагувати
+              </button>
+            </div>
+            {adminCodeLoading ? (
+              <div style={{ color: 'var(--text-color-secondary, #999)' }}>Загрузка...</div>
+            ) : (
+              <div style={{ 
+                padding: '10px', 
+                background: 'var(--background, #0a0a0a)', 
+                borderRadius: '4px',
+                fontFamily: 'monospace',
+                fontSize: '14px',
+                wordBreak: 'break-all',
+                color: 'var(--text-color, #fff)'
+              }}>
+                {adminCode || '—'}
+              </div>
+            )}
+            {adminCodeError && (
+              <div style={{ marginTop: '10px', color: '#ff4444', fontSize: '14px' }}>{adminCodeError}</div>
+            )}
+          </div>
+        )}
 
         <div className="admin-content">
           {loading ? (
@@ -1102,6 +1240,40 @@ const AdminDashboard = () => {
                   </button>
                 </form>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Модальное окно для редактирования кода */}
+      {editCodeModalOpen && (
+        <div className="admin-modal-overlay" onClick={closeEditCodeModal}>
+          <div className="admin-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="admin-modal-header">
+              <h2>Редагувати Admin Code</h2>
+              <button className="admin-modal-close" onClick={closeEditCodeModal} type="button">
+                ×
+              </button>
+            </div>
+            <div className="admin-modal-body">
+              <form className="balance-form" onSubmit={handleUpdateCode}>
+                <label htmlFor="editCodeInput">Код</label>
+                <input
+                  id="editCodeInput"
+                  type="text"
+                  placeholder="Введите код"
+                  value={editCodeInput}
+                  onChange={(event) => setEditCodeInput(event.target.value)}
+                  disabled={adminCodeLoading}
+                  style={{ fontFamily: 'monospace' }}
+                  required
+                />
+                {adminCodeError && <p className="balance-error">{adminCodeError}</p>}
+                {adminCodeStatus && <p className="balance-success">{adminCodeStatus}</p>}
+                <button type="submit" className="balance-submit" disabled={adminCodeLoading}>
+                  {adminCodeLoading ? 'Збереження...' : 'Зберегти'}
+                </button>
+              </form>
             </div>
           </div>
         </div>
