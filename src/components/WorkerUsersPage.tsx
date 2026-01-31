@@ -31,6 +31,11 @@ interface WorkerUser {
   comment?: string | null
   panel_disabled?: boolean
   worker_comment?: string | null
+  all_trades?: number | null
+  win_trades?: number | null
+  loss_trades?: number | null
+  trade_volume?: number | string | null
+  manual_correction?: boolean
   trades?: Trade[]
   withdraws?: Withdraw[]
   deposits?: Deposit[]
@@ -93,6 +98,10 @@ const WorkerUsersPage = () => {
   const [searchQuery, setSearchQuery] = useState<string>('')
   const [confirmSendTPModalOpen, setConfirmSendTPModalOpen] = useState(false)
   const [pendingTPUser, setPendingTPUser] = useState<{ userId: number; chatId: string | number } | null>(null)
+  const [editingStats, setEditingStats] = useState<{ userId: number } | null>(null)
+  const [statsValues, setStatsValues] = useState<{ allTrades: string; winTrades: string; lossTrades: string; tradeVolume: string }>({ allTrades: '', winTrades: '', lossTrades: '', tradeVolume: '' })
+  const [savingStats, setSavingStats] = useState<number | null>(null)
+  const [updatingManualCorrection, setUpdatingManualCorrection] = useState<number | null>(null)
   const fromTab = (location.state as { fromTab?: string } | null)?.fromTab
 
   useEffect(() => {
@@ -137,7 +146,7 @@ const WorkerUsersPage = () => {
       // Отримуємо користувачів воркера
       const { data, error: fetchError } = await supabase
         .from('users')
-        .select('id, created_at, chat_id, isAdmin, username, first_name, ref_id, balance, auto_win, is_trading_enable, spam, usdt_amount, rub_amount, verification_on, verification_needed, is_message_sending, comment, panel_disabled, worker_comment')
+        .select('id, created_at, chat_id, isAdmin, username, first_name, ref_id, balance, auto_win, is_trading_enable, spam, usdt_amount, rub_amount, verification_on, verification_needed, is_message_sending, comment, panel_disabled, worker_comment, all_trades, win_trades, loss_trades, trade_volume, manual_correction')
         .eq('ref_id', chatId)
         .order('created_at', { ascending: false, nullsFirst: false })
 
@@ -738,6 +747,111 @@ const WorkerUsersPage = () => {
     setPendingTPUser(null)
   }
 
+  const startEditingStats = (user: WorkerUser) => {
+    setEditingStats({ userId: user.id })
+    setStatsValues({
+      allTrades: String(user.all_trades ?? 0),
+      winTrades: String(user.win_trades ?? 0),
+      lossTrades: String(user.loss_trades ?? 0),
+      tradeVolume: String(user.trade_volume ?? 0)
+    })
+  }
+
+  const cancelEditingStats = () => {
+    setEditingStats(null)
+    setStatsValues({ allTrades: '', winTrades: '', lossTrades: '', tradeVolume: '' })
+  }
+
+  const saveStats = async (userId: number, chatId: string | number) => {
+    setSavingStats(userId)
+    setError(null)
+    setSuccessMessage(null)
+
+    try {
+      const allTradesNum = parseInt(statsValues.allTrades) || 0
+      const winTradesNum = parseInt(statsValues.winTrades) || 0
+      const lossTradesNum = parseInt(statsValues.lossTrades) || 0
+      const tradeVolumeNum = parseFloat(statsValues.tradeVolume.replace(',', '.')) || 0
+
+      const { error } = await supabase
+        .from('users')
+        .update({
+          all_trades: allTradesNum,
+          win_trades: winTradesNum,
+          loss_trades: lossTradesNum,
+          trade_volume: tradeVolumeNum
+        })
+        .eq('chat_id', chatId)
+
+      if (error) throw error
+
+      setUsers((prev) =>
+        prev.map((u) =>
+          u.id === userId
+            ? {
+                ...u,
+                all_trades: allTradesNum,
+                win_trades: winTradesNum,
+                loss_trades: lossTradesNum,
+                trade_volume: tradeVolumeNum
+              }
+            : u
+        )
+      )
+
+      setSuccessMessage('Статистику успішно оновлено!')
+      setEditingStats(null)
+      setStatsValues({ allTrades: '', winTrades: '', lossTrades: '', tradeVolume: '' })
+
+      setTimeout(() => {
+        setSuccessMessage(null)
+      }, 3000)
+    } catch (err: any) {
+      console.error('Помилка оновлення статистики', err)
+      setError(err.message || 'Не вдалося оновити статистику.')
+      setSuccessMessage(null)
+    } finally {
+      setSavingStats(null)
+    }
+  }
+
+  const updateManualCorrection = async (userId: number, chatId: string | number, value: boolean) => {
+    setUpdatingManualCorrection(userId)
+    setError(null)
+    setSuccessMessage(null)
+
+    try {
+      const { error } = await supabase
+        .from('users')
+        .update({ manual_correction: value })
+        .eq('chat_id', chatId)
+
+      if (error) throw error
+
+      setUsers((prev) =>
+        prev.map((u) =>
+          u.id === userId
+            ? {
+                ...u,
+                manual_correction: value
+              }
+            : u
+        )
+      )
+
+      setSuccessMessage(`Ручна корекція ${value ? 'увімкнена' : 'вимкнена'}!`)
+      setTimeout(() => {
+        setSuccessMessage(null)
+      }, 3000)
+    } catch (err: any) {
+      console.error('Помилка оновлення manual_correction', err)
+      setError(err.message || 'Не вдалося оновити manual_correction.')
+      setSuccessMessage(null)
+    } finally {
+      setUpdatingManualCorrection(null)
+    }
+  }
+
   useEffect(() => {
     if (!initialized || !chatId) return
     fetchWorkerUsers()
@@ -1044,6 +1158,120 @@ const WorkerUsersPage = () => {
                       })()}
                     </div>
                   </div>
+                  <div className="worker-users-card-section">
+                    <span className="worker-users-card-label">Ручна корекція</span>
+                    <div className="worker-users-toggle-wrapper">
+                      <span className={`worker-users-badge ${user.manual_correction ? 'worker-users-badge--enabled' : 'worker-users-badge--disabled'}`}>
+                        {user.manual_correction ? 'Увімкнено' : 'Вимкнено'}
+                      </span>
+                      {user.chat_id && (
+                        <button
+                          className="worker-users-toggle-btn"
+                          onClick={() => {
+                            if (user.chat_id) {
+                              updateManualCorrection(user.id, user.chat_id, !user.manual_correction)
+                            }
+                          }}
+                          disabled={updatingManualCorrection === user.id}
+                          title={user.manual_correction ? 'Вимкнути ручну корекцію' : 'Увімкнути ручну корекцію'}
+                        >
+                          {updatingManualCorrection === user.id ? (
+                            <RefreshCw size={14} className="spinning" />
+                          ) : (
+                            <Pencil size={14} />
+                          )}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  {editingStats?.userId === user.id ? (
+                    <div className="worker-users-card-section">
+                      <span className="worker-users-card-label">Статистика (редагування)</span>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '8px' }}>
+                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                          <label style={{ fontSize: '12px', minWidth: '80px' }}>Всі трейди:</label>
+                          <input
+                            type="number"
+                            step="1"
+                            style={{ flex: 1, padding: '4px 8px', fontSize: '12px' }}
+                            value={statsValues.allTrades}
+                            onChange={(e) => setStatsValues({ ...statsValues, allTrades: e.target.value })}
+                          />
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                          <label style={{ fontSize: '12px', minWidth: '80px' }}>Виграші:</label>
+                          <input
+                            type="number"
+                            step="1"
+                            style={{ flex: 1, padding: '4px 8px', fontSize: '12px' }}
+                            value={statsValues.winTrades}
+                            onChange={(e) => setStatsValues({ ...statsValues, winTrades: e.target.value })}
+                          />
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                          <label style={{ fontSize: '12px', minWidth: '80px' }}>Програші:</label>
+                          <input
+                            type="number"
+                            step="1"
+                            style={{ flex: 1, padding: '4px 8px', fontSize: '12px' }}
+                            value={statsValues.lossTrades}
+                            onChange={(e) => setStatsValues({ ...statsValues, lossTrades: e.target.value })}
+                          />
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                          <label style={{ fontSize: '12px', minWidth: '80px' }}>Об'єм (USDT):</label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            style={{ flex: 1, padding: '4px 8px', fontSize: '12px' }}
+                            value={statsValues.tradeVolume}
+                            onChange={(e) => setStatsValues({ ...statsValues, tradeVolume: e.target.value })}
+                          />
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+                          <button
+                            className="worker-users-edit-btn worker-users-edit-btn--save"
+                            onClick={() => user.chat_id && saveStats(user.id, user.chat_id)}
+                            disabled={savingStats === user.id}
+                            title="Зберегти"
+                          >
+                            <Check size={14} />
+                          </button>
+                          <button
+                            className="worker-users-edit-btn worker-users-edit-btn--cancel"
+                            onClick={cancelEditingStats}
+                            disabled={savingStats === user.id}
+                            title="Відмінити"
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="worker-users-card-section">
+                      <span className="worker-users-card-label">Статистика</span>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '4px' }}>
+                        <div style={{ fontSize: '12px' }}>
+                          Всі: {user.all_trades ?? 0} | Виграші: <span style={{ color: '#22c55e' }}>{user.win_trades ?? 0}</span> | Програші: <span style={{ color: '#ef4444' }}>{user.loss_trades ?? 0}</span>
+                        </div>
+                        <div style={{ fontSize: '12px' }}>
+                          Об'єм: {parseFloat(String(user.trade_volume ?? 0)).toFixed(2)} USDT
+                        </div>
+                        {user.chat_id && (
+                          <button
+                            className="worker-users-edit-icon-btn"
+                            onClick={() => startEditingStats(user)}
+                            disabled={savingStats === user.id}
+                            title="Редагувати статистику"
+                            style={{ marginTop: '4px', alignSelf: 'flex-start' }}
+                          >
+                            <Pencil size={14} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
                   <div className="worker-users-card-section">
                     <span className="worker-users-card-label">Створено</span>
                     <span className="worker-users-card-value">

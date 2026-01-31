@@ -3389,7 +3389,7 @@ https://t.me/+faqFs28Xnx85Mjdi`
                     <input
                       className="admin-trading-search"
                       type="search"
-                      placeholder="Поиск по closer, smm, type, platform или job"
+                      placeholder="Поиск по closer, smm, type, дейтінг або роботу ліда"
                       value={paymentSearch}
                       onChange={(e) => setPaymentSearch(e.target.value)}
                     />
@@ -3424,8 +3424,8 @@ https://t.me/+faqFs28Xnx85Mjdi`
                                   <tr>
                                     <th>Closer</th>
                                     <th>SMM</th>
-                                    <th>Platform</th>
-                                    <th>Job</th>
+                                    <th>Дейтінг</th>
+                                    <th>Робота ліда</th>
                                     <th>Amount</th>
                                     <th>Type</th>
                                     <th>Создано</th>
@@ -3710,22 +3710,22 @@ https://t.me/+faqFs28Xnx85Mjdi`
                 />
               </div>
               <div className="admin-trading-form-field">
-                <label htmlFor="platform">Platform</label>
+                <label htmlFor="platform">Дейтінг</label>
                 <input
                   id="platform"
                   type="text"
-                  placeholder="Введите platform"
+                  placeholder="Введіть дейтінг"
                   value={paymentFormData.platform}
                   onChange={(e) => setPaymentFormData({ ...paymentFormData, platform: e.target.value })}
                   disabled={paymentFormLoading}
                 />
               </div>
               <div className="admin-trading-form-field">
-                <label htmlFor="job">Job</label>
+                <label htmlFor="job">Роботу ліда</label>
                 <input
                   id="job"
                   type="text"
-                  placeholder="Введите job"
+                  placeholder="Введіть роботу ліда"
                   value={paymentFormData.job}
                   onChange={(e) => setPaymentFormData({ ...paymentFormData, job: e.target.value })}
                   disabled={paymentFormLoading}
