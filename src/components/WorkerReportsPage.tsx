@@ -20,6 +20,17 @@ interface WorkerReport {
   } | null
 }
 
+const getReportImageUrl = (report: WorkerReport) => {
+  if (report.message_type !== 'photo' || !report.file_id) return null
+
+  const base = import.meta.env.VITE_TELEGRAM_FILE_PROXY_URL as string | undefined
+  if (!base) return null
+
+  // Очікуємо, що бекенд/проксі вміє віддавати картинку по file_id
+  const url = `${base}?file_id=${encodeURIComponent(report.file_id)}`
+  return url
+}
+
 const WorkerReportsPage = () => {
   const navigate = useNavigate()
   const { closerChatId } = useParams<{ closerChatId: string }>()
@@ -180,6 +191,7 @@ const WorkerReportsPage = () => {
               const messageTypeIcon = report.message_type === 'photo' ? '📷' : 
                                      report.message_type === 'document' ? '📄' : 
                                      report.message_type === 'video' ? '🎥' : '💬'
+              const imageUrl = getReportImageUrl(report)
               
               return (
                 <div 
@@ -212,6 +224,11 @@ const WorkerReportsPage = () => {
                     <div className="worker-reports-item-text">
                       {report.message_text || <span className="worker-reports-item-empty">Текст відсутній</span>}
                     </div>
+                    {imageUrl && (
+                      <div className="worker-reports-item-image">
+                        <img src={imageUrl} alt="Скріншот звіту" />
+                      </div>
+                    )}
                   </div>
                   
                   {report.file_id && (

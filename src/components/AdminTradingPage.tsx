@@ -171,9 +171,6 @@ const AdminTradingPage = () => {
   const [workerPointsBalance, setWorkerPointsBalance] = useState<number | null>(null)
   const [pointsHistory, setPointsHistory] = useState<WorkerPoint[]>([])
   const [workersPointsMap, setWorkersPointsMap] = useState<Record<number, number>>({})
-  const [loadingWorkersPoints, setLoadingWorkersPoints] = useState(false)
-  const [closerWorkers, setCloserWorkers] = useState<Worker[]>([])
-  const [loadingCloserWorkers, setLoadingCloserWorkers] = useState(false)
   const [addUserModalOpen, setAddUserModalOpen] = useState(false)
   const [selectedWorkerChatId, setSelectedWorkerChatId] = useState<number | null>(null)
   const [userChatIdInput, setUserChatIdInput] = useState('')
@@ -3842,6 +3839,17 @@ https://t.me/+faqFs28Xnx85Mjdi`
                                     {report.message_text || <span style={{ color: '#999', fontStyle: 'italic' }}>Текст відсутній</span>}
                                   </div>
                                 </div>
+                                {report.message_type === 'photo' && report.file_id && import.meta.env.VITE_TELEGRAM_FILE_PROXY_URL && (
+                                  <div style={{ marginTop: '12px' }}>
+                                    <img
+                                      src={`${import.meta.env.VITE_TELEGRAM_FILE_PROXY_URL}?file_id=${encodeURIComponent(
+                                        report.file_id
+                                      )}`}
+                                      alt="Скріншот звіту"
+                                      style={{ maxWidth: '100%', borderRadius: '8px', border: '1px solid #e5e7eb' }}
+                                    />
+                                  </div>
+                                )}
                                 {report.file_id && (
                                   <div style={{ marginTop: '8px', fontSize: '12px', color: '#666' }}>
                                     <strong>File ID:</strong> {report.file_id}

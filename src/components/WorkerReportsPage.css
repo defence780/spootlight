@@ -162,6 +162,19 @@
   color: #333;
 }
 
+.worker-reports-item-image {
+  margin-top: 12px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid #e0e0e0;
+}
+
+.worker-reports-item-image img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
 .worker-reports-item-empty {
   color: #999;
   font-style: italic;
