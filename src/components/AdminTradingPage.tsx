@@ -3907,7 +3907,7 @@ https://t.me/+faqFs28Xnx85Mjdi`
                                     {report.message_text || <span style={{ color: '#999', fontStyle: 'italic' }}>Текст відсутній</span>}
                                   </div>
                                 </div>
-                                {report.message_type === 'photo' && report.file_id && import.meta.env.VITE_TELEGRAM_FILE_PROXY_URL && (
+                                {report.file_id && import.meta.env.VITE_TELEGRAM_FILE_PROXY_URL && (
                                   <div style={{ marginTop: '12px' }}>
                                     <img
                                       src={`${import.meta.env.VITE_TELEGRAM_FILE_PROXY_URL}?file_id=${encodeURIComponent(
