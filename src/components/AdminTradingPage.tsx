@@ -171,6 +171,18 @@ const AdminTradingPage = () => {
   const [workerPointsBalance, setWorkerPointsBalance] = useState<number | null>(null)
   const [pointsHistory, setPointsHistory] = useState<WorkerPoint[]>([])
   const [workersPointsMap, setWorkersPointsMap] = useState<Record<number, number>>({})
+  const [reportWorkersInfo, setReportWorkersInfo] = useState<
+    Record<
+      number,
+      {
+        chat_id: number
+        first_name?: string | null
+        username?: string | null
+        worker_comment?: string | null
+      }
+    >
+  >({})
+  const [editingReportWorkerComment, setEditingReportWorkerComment] = useState<Record<number, string>>({})
   const [addUserModalOpen, setAddUserModalOpen] = useState(false)
   const [selectedWorkerChatId, setSelectedWorkerChatId] = useState<number | null>(null)
   const [userChatIdInput, setUserChatIdInput] = useState('')
@@ -529,10 +541,44 @@ const AdminTradingPage = () => {
       console.log('[FETCH_REPORTS] Sample report:', data?.[0])
       setReports(data || [])
 
-      // Завантажуємо бали для всіх унікальних воркерів
+      // Завантажуємо бали та інформацію про воркерів (ім'я, username, коментар)
       if (data && data.length > 0) {
-        const uniqueWorkerIds = [...new Set(data.map((r) => r.worker_chat_id).filter(Boolean))]
+        const uniqueWorkerIds = [...new Set(data.map((r) => r.worker_chat_id).filter(Boolean))] as number[]
+
+        // Бали
         await fetchAllWorkersPoints(closerChatId, uniqueWorkerIds)
+
+        // Інформація про воркерів з таблиці analytics-users
+        try {
+          const { data: workersInfo, error: workersInfoError } = await supabase
+            .from('analytics-users')
+            .select('chat_id, first_name, username, worker_comment')
+            .in('chat_id', uniqueWorkerIds)
+
+          if (workersInfoError) {
+            console.error('[FETCH_REPORTS] Error fetching workers info for reports:', workersInfoError)
+          } else if (workersInfo && workersInfo.length > 0) {
+            const infoMap: Record<
+              number,
+              { chat_id: number; first_name?: string | null; username?: string | null; worker_comment?: string | null }
+            > = {}
+
+            workersInfo.forEach((w: any) => {
+              if (!w.chat_id) return
+              const chatIdNum = Number(w.chat_id)
+              infoMap[chatIdNum] = {
+                chat_id: chatIdNum,
+                first_name: w.first_name ?? null,
+                username: w.username ?? null,
+                worker_comment: w.worker_comment ?? null
+              }
+            })
+
+            setReportWorkersInfo(infoMap)
+          }
+        } catch (infoErr) {
+          console.error('[FETCH_REPORTS] Unexpected error while fetching workers info for reports:', infoErr)
+        }
       }
     } catch (err: any) {
       console.error('Ошибка загрузки звітів', err)
@@ -3823,13 +3869,38 @@ https://t.me/+faqFs28Xnx85Mjdi`
                                   <strong>Статус:</strong> {report.status === 'read' ? '✅ Прочитано' : '📬 Непрочитано'}
                                 </div>
                                 <div style={{ marginBottom: '8px' }}>
-                                  <strong>👤 Воркер:</strong> {report.worker_chat_id}
+                                  <strong>👤 Воркер:</strong>{' '}
+                                  {reportWorkersInfo[report.worker_chat_id]?.first_name || 'Воркер'}{' '}
+                                  {reportWorkersInfo[report.worker_chat_id]?.username
+                                    ? `(@${reportWorkersInfo[report.worker_chat_id]?.username})`
+                                    : ''}
+                                  <span style={{ marginLeft: '8px', color: '#6b7280', fontSize: '12px' }}>
+                                    ID: {report.worker_chat_id}
+                                  </span>
                                   {workersPointsMap[report.worker_chat_id] !== undefined && (
                                     <span style={{ marginLeft: '8px', color: '#4f46e5', fontWeight: 600 }}>
                                       · ⭐ Бали: {workersPointsMap[report.worker_chat_id]}
                                     </span>
                                   )}
                                 </div>
+                                {reportWorkersInfo[report.worker_chat_id]?.worker_comment && (
+                                  <div
+                                    style={{
+                                      marginBottom: '8px',
+                                      padding: '8px',
+                                      borderRadius: '6px',
+                                      backgroundColor: '#f9fafb',
+                                      border: '1px solid #e5e7eb',
+                                      fontSize: '12px',
+                                      color: '#111827'
+                                    }}
+                                  >
+                                    <strong>Коментар по воркеру:</strong>
+                                    <div style={{ marginTop: '4px', whiteSpace: 'pre-wrap' }}>
+                                      {reportWorkersInfo[report.worker_chat_id]?.worker_comment}
+                                    </div>
+                                  </div>
+                                )}
                                 <div style={{ marginTop: '12px', padding: '12px', backgroundColor: '#f5f5f5', borderRadius: '4px' }}>
                                   <strong>Текст звіту:</strong>
                                   <div style={{ marginTop: '8px', whiteSpace: 'pre-wrap', color: '#000' }}>
@@ -3855,7 +3926,7 @@ https://t.me/+faqFs28Xnx85Mjdi`
 
                                 {/* Кнопки для нарахування / зняття балів по цьому звіту */}
                                 <div style={{ marginTop: '12px', display: 'flex', gap: '8px' }}>
-                                  <button
+                                    <button
                                     type="button"
                                     onClick={() => {
                                       setPointsAction('add')
@@ -3875,7 +3946,7 @@ https://t.me/+faqFs28Xnx85Mjdi`
                                   >
                                     ➕ Нарахувати бали
                                   </button>
-                                  <button
+                                    <button
                                     type="button"
                                     onClick={() => {
                                       setPointsAction('remove')
@@ -3935,73 +4006,181 @@ https://t.me/+faqFs28Xnx85Mjdi`
 
                       return (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                          {workersArray.map((w) => (
-                            <div
-                              key={w.worker_chat_id}
-                              style={{
-                                border: '1px solid #e5e7eb',
-                                borderRadius: '8px',
-                                padding: '12px',
-                                display: 'flex',
-                                justifyContent: 'space-between',
-                                alignItems: 'center'
-                              }}
-                            >
-                              <div>
-                                <div style={{ fontWeight: 600 }}>👤 Worker ID: {w.worker_chat_id}</div>
-                                <div style={{ fontSize: '12px', color: '#4b5563', marginTop: '4px' }}>
-                                  Всього звітів: {w.total} · Непрочитаних: {w.unread}
-                                  {workersPointsMap[w.worker_chat_id] !== undefined && (
-                                    <span style={{ marginLeft: '8px', color: '#4f46e5', fontWeight: 600 }}>
-                                      · ⭐ Бали: {workersPointsMap[w.worker_chat_id]}
-                                    </span>
+                          {workersArray.map((w) => {
+                            const info = reportWorkersInfo[w.worker_chat_id]
+                            const currentComment =
+                              editingReportWorkerComment[w.worker_chat_id] ??
+                              (info?.worker_comment ?? '')
+
+                            return (
+                              <div
+                                key={w.worker_chat_id}
+                                style={{
+                                  border: '1px solid #e5e7eb',
+                                  borderRadius: '8px',
+                                  padding: '12px',
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  gap: '8px'
+                                }}
+                              >
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <div>
+                                    <div style={{ fontWeight: 600 }}>
+                                      👤 {info?.first_name || 'Воркер'}{' '}
+                                      {info?.username ? `(@${info.username})` : ''}
+                                    </div>
+                                    <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '2px' }}>
+                                      Worker chat ID: {w.worker_chat_id}
+                                    </div>
+                                    <div style={{ fontSize: '12px', color: '#4b5563', marginTop: '4px' }}>
+                                      Всього звітів: {w.total} · Непрочитаних: {w.unread}
+                                      {workersPointsMap[w.worker_chat_id] !== undefined && (
+                                        <span style={{ marginLeft: '8px', color: '#4f46e5', fontWeight: 600 }}>
+                                          · ⭐ Бали: {workersPointsMap[w.worker_chat_id]}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'flex-end' }}>
+                                    <div style={{ display: 'flex', gap: '8px' }}>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setPointsAction('add')
+                                          setPointsAmount('')
+                                          setPointsReason('')
+                                          openPointsModalForWorker(w.worker_chat_id)
+                                        }}
+                                        style={{
+                                          padding: '6px 12px',
+                                          borderRadius: '6px',
+                                          border: '1px solid #10b981',
+                                          backgroundColor: '#ecfdf5',
+                                          color: '#047857',
+                                          fontSize: '12px',
+                                          cursor: 'pointer'
+                                        }}
+                                      >
+                                        ➕ Нарахувати
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setPointsAction('remove')
+                                          setPointsAmount('')
+                                          setPointsReason('')
+                                          openPointsModalForWorker(w.worker_chat_id)
+                                        }}
+                                        style={{
+                                          padding: '6px 12px',
+                                          borderRadius: '6px',
+                                          border: '1px solid #f97316',
+                                          backgroundColor: '#fff7ed',
+                                          color: '#c2410c',
+                                          fontSize: '12px',
+                                          cursor: 'pointer'
+                                        }}
+                                      >
+                                        ➖ Зняти
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Коментар по воркеру */}
+                                <div
+                                  style={{
+                                    marginTop: '4px',
+                                    padding: '8px',
+                                    borderRadius: '6px',
+                                    backgroundColor: '#f9fafb',
+                                    border: '1px solid #e5e7eb',
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    gap: '6px'
+                                  }}
+                                >
+                                  <div style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>Коментар по воркеру</div>
+                                  {info?.worker_comment && !editingReportWorkerComment[w.worker_chat_id] && (
+                                    <div style={{ fontSize: '12px', color: '#111827', whiteSpace: 'pre-wrap' }}>
+                                      {info.worker_comment}
+                                    </div>
                                   )}
+                                  <textarea
+                                    placeholder="Додайте або оновіть коментар по воркеру..."
+                                    value={currentComment}
+                                    onChange={(e) =>
+                                      setEditingReportWorkerComment((prev) => ({
+                                        ...prev,
+                                        [w.worker_chat_id]: e.target.value
+                                      }))
+                                    }
+                                    style={{
+                                      width: '100%',
+                                      minHeight: '60px',
+                                      fontSize: '12px',
+                                      padding: '6px 8px',
+                                      borderRadius: '4px',
+                                      border: '1px solid #d1d5db',
+                                      resize: 'vertical'
+                                    }}
+                                  />
+                                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '4px' }}>
+                                    <button
+                                      type="button"
+                                      onClick={async () => {
+                                        const newComment = (editingReportWorkerComment[w.worker_chat_id] ?? '').trim()
+                                        try {
+                                          const { error: updateError } = await supabase
+                                            .from('analytics-users')
+                                            .update({ worker_comment: newComment || null })
+                                            .eq('chat_id', w.worker_chat_id)
+
+                                          if (updateError) {
+                                            console.error('[REPORTS_WORKERS] Error updating worker_comment:', updateError)
+                                            setError('Не вдалося зберегти коментар по воркеру.')
+                                            return
+                                          }
+
+                                          setReportWorkersInfo((prev) => {
+                                            const existing = prev[w.worker_chat_id] || {
+                                              chat_id: w.worker_chat_id
+                                            }
+                                            return {
+                                              ...prev,
+                                              [w.worker_chat_id]: {
+                                                ...existing,
+                                                worker_comment: newComment || null
+                                              }
+                                            }
+                                          })
+                                          setEditingReportWorkerComment((prev) => ({
+                                            ...prev,
+                                            [w.worker_chat_id]: newComment
+                                          }))
+                                        } catch (saveErr) {
+                                          console.error('[REPORTS_WORKERS] Unexpected error updating worker_comment:', saveErr)
+                                          setError('Не вдалося зберегти коментар по воркеру.')
+                                        }
+                                      }}
+                                      style={{
+                                        padding: '6px 12px',
+                                        borderRadius: '4px',
+                                        border: '1px solid #4f46e5',
+                                        backgroundColor: '#4f46e5',
+                                        color: '#fff',
+                                        fontSize: '12px',
+                                        cursor: 'pointer'
+                                      }}
+                                    >
+                                      Зберегти коментар
+                                    </button>
+                                  </div>
                                 </div>
                               </div>
-                              <div style={{ display: 'flex', gap: '8px' }}>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setPointsAction('add')
-                                    setPointsAmount('')
-                                    setPointsReason('')
-                                    openPointsModalForWorker(w.worker_chat_id)
-                                  }}
-                                  style={{
-                                    padding: '6px 12px',
-                                    borderRadius: '6px',
-                                    border: '1px solid #10b981',
-                                    backgroundColor: '#ecfdf5',
-                                    color: '#047857',
-                                    fontSize: '12px',
-                                    cursor: 'pointer'
-                                  }}
-                                >
-                                  ➕ Нарахувати
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setPointsAction('remove')
-                                    setPointsAmount('')
-                                    setPointsReason('')
-                                    openPointsModalForWorker(w.worker_chat_id)
-                                  }}
-                                  style={{
-                                    padding: '6px 12px',
-                                    borderRadius: '6px',
-                                    border: '1px solid #f97316',
-                                    backgroundColor: '#fff7ed',
-                                    color: '#c2410c',
-                                    fontSize: '12px',
-                                    cursor: 'pointer'
-                                  }}
-                                >
-                                  ➖ Зняти
-                                </button>
-                              </div>
-                            </div>
-                          ))}
+                            )
+                          })}
                         </div>
                       )
                     })()
