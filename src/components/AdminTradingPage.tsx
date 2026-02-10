@@ -90,6 +90,16 @@ interface WorkerLead {
   notes?: string | null
 }
 
+interface WorkerPoint {
+  id: number
+  worker_chat_id: number
+  closer_chat_id: number
+  points: number
+  reason?: string | null
+  created_at: string
+  created_by: number
+}
+
 const AdminTradingPage = () => {
   const navigate = useNavigate()
   const { tab } = useParams<{ tab?: string }>()
@@ -151,6 +161,19 @@ const AdminTradingPage = () => {
   const [leads, setLeads] = useState<WorkerLead[]>([])
   const [loadingReports, setLoadingReports] = useState(false)
   const [loadingLeads, setLoadingLeads] = useState(false)
+  const [reportsModalTab, setReportsModalTab] = useState<'reports' | 'workers'>('reports')
+  const [reportsFilter, setReportsFilter] = useState<'all' | 'read' | 'unread'>('all')
+  const [pointsModal, setPointsModal] = useState<{ workerChatId: number; closerChatId: number } | null>(null)
+  const [pointsAmount, setPointsAmount] = useState<string>('')
+  const [pointsReason, setPointsReason] = useState<string>('')
+  const [pointsAction, setPointsAction] = useState<'add' | 'remove'>('add')
+  const [loadingPoints, setLoadingPoints] = useState(false)
+  const [workerPointsBalance, setWorkerPointsBalance] = useState<number | null>(null)
+  const [pointsHistory, setPointsHistory] = useState<WorkerPoint[]>([])
+  const [workersPointsMap, setWorkersPointsMap] = useState<Record<number, number>>({})
+  const [loadingWorkersPoints, setLoadingWorkersPoints] = useState(false)
+  const [closerWorkers, setCloserWorkers] = useState<Worker[]>([])
+  const [loadingCloserWorkers, setLoadingCloserWorkers] = useState(false)
   const [addUserModalOpen, setAddUserModalOpen] = useState(false)
   const [selectedWorkerChatId, setSelectedWorkerChatId] = useState<number | null>(null)
   const [userChatIdInput, setUserChatIdInput] = useState('')
@@ -508,11 +531,66 @@ const AdminTradingPage = () => {
       console.log('[FETCH_REPORTS] Reports fetched:', data?.length || 0, 'reports')
       console.log('[FETCH_REPORTS] Sample report:', data?.[0])
       setReports(data || [])
+
+      // Завантажуємо бали для всіх унікальних воркерів
+      if (data && data.length > 0) {
+        const uniqueWorkerIds = [...new Set(data.map((r) => r.worker_chat_id).filter(Boolean))]
+        await fetchAllWorkersPoints(closerChatId, uniqueWorkerIds)
+      }
     } catch (err: any) {
       console.error('Ошибка загрузки звітів', err)
       setError(err.message || 'Не удалось загрузить звіти.')
     } finally {
       setLoadingReports(false)
+    }
+  }
+
+  const fetchAllWorkersPoints = async (closerChatId: number, workerChatIds: number[]) => {
+    if (workerChatIds.length === 0) return
+
+    setLoadingWorkersPoints(true)
+    try {
+      const pointsMap: Record<number, number> = {}
+
+      // Завантажуємо бали для кожного воркера
+      await Promise.all(
+        workerChatIds.map(async (workerChatId) => {
+          try {
+            // Спочатку пробуємо через RPC
+            const { data: balanceData, error: balanceError } = await supabase.rpc('get_worker_points_balance', {
+              p_worker_chat_id: workerChatId,
+              p_closer_chat_id: closerChatId
+            })
+
+            if (!balanceError && typeof balanceData === 'number') {
+              pointsMap[workerChatId] = balanceData
+            } else {
+              // Якщо RPC не працює, рахуємо суму з транзакцій
+              const { data: history } = await supabase
+                .from('worker_points')
+                .select('points')
+                .eq('worker_chat_id', workerChatId)
+                .eq('closer_chat_id', closerChatId)
+
+              if (history && history.length > 0) {
+                const sum = history.reduce((acc, item) => acc + (item.points || 0), 0)
+                pointsMap[workerChatId] = sum
+              } else {
+                pointsMap[workerChatId] = 0
+              }
+            }
+          } catch (err) {
+            console.error(`[POINTS] Error fetching points for worker ${workerChatId}:`, err)
+            pointsMap[workerChatId] = 0
+          }
+        })
+      )
+
+      setWorkersPointsMap(pointsMap)
+    } catch (err) {
+      console.error('[POINTS] Error fetching all workers points:', err)
+    } finally {
+      setLoadingWorkersPoints(false)
     }
   }
 
@@ -553,8 +631,123 @@ const AdminTradingPage = () => {
   }
 
   const handleViewReports = async (closerChatId: number) => {
+    setReportsModalTab('reports')
+    setReportsFilter('all')
+    setWorkersPointsMap({}) // Очищаємо попередні бали
     setShowReportsModal(closerChatId)
     await fetchReports(closerChatId)
+  }
+
+  const fetchWorkerPoints = async (closerChatId: number, workerChatId: number) => {
+    try {
+      setLoadingPoints(true)
+      setWorkerPointsBalance(null)
+      setPointsHistory([])
+
+      // Перш за все пробуємо отримати баланс через RPC-функцію, якщо вона є
+      try {
+        const { data: balanceData, error: balanceError } = await supabase.rpc('get_worker_points_balance', {
+          p_worker_chat_id: workerChatId,
+          p_closer_chat_id: closerChatId
+        })
+
+        if (balanceError) {
+          console.error('[POINTS] Error fetching balance via RPC:', balanceError)
+        } else if (typeof balanceData === 'number') {
+          setWorkerPointsBalance(balanceData)
+        }
+      } catch (rpcErr) {
+        console.error('[POINTS] RPC get_worker_points_balance failed:', rpcErr)
+      }
+
+      // Історія транзакцій балів
+      const { data: history, error: historyError } = await supabase
+        .from('worker_points')
+        .select('*')
+        .eq('worker_chat_id', workerChatId)
+        .eq('closer_chat_id', closerChatId)
+        .order('created_at', { ascending: false })
+
+      if (historyError) {
+        console.error('[POINTS] Error fetching worker points history:', historyError)
+      } else {
+        setPointsHistory((history as WorkerPoint[]) || [])
+
+        // Якщо баланс ще не встановлений з RPC — рахуємо суму локально
+        if (workerPointsBalance === null && history && history.length > 0) {
+          const sum = history.reduce((acc, item) => acc + (item.points || 0), 0)
+          setWorkerPointsBalance(sum)
+        }
+      }
+    } catch (err) {
+      console.error('[POINTS] Unexpected error while fetching worker points:', err)
+    } finally {
+      setLoadingPoints(false)
+    }
+  }
+
+  const openPointsModalForWorker = (workerChatId: number) => {
+    if (!showReportsModal) return
+    const closerChatId = showReportsModal
+    setPointsAction('add')
+    setPointsAmount('')
+    setPointsReason('')
+    setPointsModal({ workerChatId, closerChatId })
+    fetchWorkerPoints(closerChatId, workerChatId)
+  }
+
+  const openPointsModalForReport = (report: WorkerReport) => {
+    if (!showReportsModal) return
+    const closerChatId = showReportsModal
+    setPointsAction('add')
+    setPointsAmount('')
+    setPointsReason('')
+    setPointsModal({ workerChatId: report.worker_chat_id, closerChatId })
+    fetchWorkerPoints(closerChatId, report.worker_chat_id)
+  }
+
+  const handleSubmitPoints = async () => {
+    if (!pointsModal) return
+
+    const raw = Number(pointsAmount.replace(',', '.'))
+    if (!raw || isNaN(raw)) {
+      alert('Введіть коректну кількість балів')
+      return
+    }
+
+    const value = pointsAction === 'remove' ? -Math.abs(raw) : Math.abs(raw)
+
+    try {
+      setLoadingPoints(true)
+      const payload = {
+        worker_chat_id: pointsModal.workerChatId,
+        closer_chat_id: pointsModal.closerChatId,
+        points: value,
+        reason: pointsReason || null,
+        created_by: pointsModal.closerChatId
+      }
+
+      const { error } = await supabase.from('worker_points').insert(payload)
+      if (error) {
+        console.error('[POINTS] Error inserting worker_points:', error)
+        alert('Не вдалося зберегти бали. Перевірте консоль.')
+        return
+      }
+
+      setPointsAmount('')
+      setPointsReason('')
+      await fetchWorkerPoints(pointsModal.closerChatId, pointsModal.workerChatId)
+      // Оновлюємо бали в мапі після зміни
+      if (showReportsModal) {
+        const uniqueWorkerIds = [...new Set(reports.map((r) => r.worker_chat_id).filter(Boolean))]
+        await fetchAllWorkersPoints(showReportsModal, uniqueWorkerIds)
+      }
+    } catch (err) {
+      console.error('[POINTS] Unexpected error inserting worker_points:', err)
+      alert('Сталася помилка при збереженні балів.')
+    } finally {
+      setLoadingPoints(false)
+    }
   }
 
   const handleViewLeads = async (closerChatId: number, status: 'all' | 'active' | 'rejected' | 'closed' = 'all') => {
@@ -3491,11 +3684,26 @@ https://t.me/+faqFs28Xnx85Mjdi`
       </div>
       {/* Модальне вікно для звітів */}
       {showReportsModal && (
-        <div className="admin-trading-modal-overlay" onClick={() => setShowReportsModal(null)}>
+        <div
+          className="admin-trading-modal-overlay"
+          onClick={() => {
+            setShowReportsModal(null)
+            setReportsModalTab('reports')
+            setReportsFilter('all')
+          }}
+        >
           <div className="admin-trading-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '800px', maxHeight: '90vh', overflow: 'auto' }}>
             <div className="admin-trading-modal-header">
               <h2>📋 Звіти клоузера</h2>
-              <button className="admin-trading-modal-close" type="button" onClick={() => setShowReportsModal(null)}>
+              <button
+                className="admin-trading-modal-close"
+                type="button"
+                onClick={() => {
+                  setShowReportsModal(null)
+                  setReportsModalTab('reports')
+                  setReportsFilter('all')
+                }}
+              >
                 ×
               </button>
             </div>
@@ -3505,37 +3713,295 @@ https://t.me/+faqFs28Xnx85Mjdi`
               ) : reports.length === 0 ? (
                 <p>Звіти не знайдені</p>
               ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                  {reports.map((report) => (
-                    <div key={report.id} style={{ border: '1px solid #ddd', borderRadius: '8px', padding: '16px' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                        <div>
-                          <strong>ID:</strong> {report.id}
-                        </div>
-                        <div style={{ fontSize: '12px', color: '#666' }}>
-                          {new Date(report.created_at).toLocaleString('uk-UA')}
-                        </div>
+                <>
+                  {/* Таби всередині модалки: Звіти / Воркери */}
+                  <div style={{ display: 'flex', marginBottom: '16px', gap: '8px' }}>
+                    <button
+                      type="button"
+                      onClick={() => setReportsModalTab('reports')}
+                      style={{
+                        padding: '8px 16px',
+                        borderRadius: '6px',
+                        border: reportsModalTab === 'reports' ? '2px solid #4f46e5' : '1px solid #ddd',
+                        backgroundColor: reportsModalTab === 'reports' ? '#4f46e5' : '#f3f4f6',
+                        color: reportsModalTab === 'reports' ? '#fff' : '#111827',
+                        fontWeight: reportsModalTab === 'reports' ? 600 : 500,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      📋 Звіти
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setReportsModalTab('workers')}
+                      style={{
+                        padding: '8px 16px',
+                        borderRadius: '6px',
+                        border: reportsModalTab === 'workers' ? '2px solid #4f46e5' : '1px solid #ddd',
+                        backgroundColor: reportsModalTab === 'workers' ? '#4f46e5' : '#f3f4f6',
+                        color: reportsModalTab === 'workers' ? '#fff' : '#111827',
+                        fontWeight: reportsModalTab === 'workers' ? 600 : 500,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      👥 Воркери
+                    </button>
+                  </div>
+
+                  {/* Контент табів */}
+                  {reportsModalTab === 'reports' ? (
+                    <>
+                      {/* Фільтр звітів: всі / прочитані / непрочитані */}
+                      <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+                        <button
+                          type="button"
+                          onClick={() => setReportsFilter('all')}
+                          style={{
+                            padding: '6px 12px',
+                            borderRadius: '999px',
+                            border: reportsFilter === 'all' ? '2px solid #4f46e5' : '1px solid #d1d5db',
+                            backgroundColor: reportsFilter === 'all' ? '#4f46e5' : '#f9fafb',
+                            color: reportsFilter === 'all' ? '#fff' : '#111827',
+                            fontSize: '12px',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          Всі
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setReportsFilter('unread')}
+                          style={{
+                            padding: '6px 12px',
+                            borderRadius: '999px',
+                            border: reportsFilter === 'unread' ? '2px solid #f97316' : '1px solid #d1d5db',
+                            backgroundColor: reportsFilter === 'unread' ? '#f97316' : '#f9fafb',
+                            color: reportsFilter === 'unread' ? '#fff' : '#111827',
+                            fontSize: '12px',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          Непрочитані
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setReportsFilter('read')}
+                          style={{
+                            padding: '6px 12px',
+                            borderRadius: '999px',
+                            border: reportsFilter === 'read' ? '2px solid #10b981' : '1px solid #d1d5db',
+                            backgroundColor: reportsFilter === 'read' ? '#10b981' : '#f9fafb',
+                            color: reportsFilter === 'read' ? '#fff' : '#111827',
+                            fontSize: '12px',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          Прочитані
+                        </button>
                       </div>
-                      <div style={{ marginBottom: '8px' }}>
-                        <strong>Тип:</strong> {report.message_type}
-                      </div>
-                      <div style={{ marginBottom: '8px' }}>
-                        <strong>Статус:</strong> {report.status === 'read' ? '✅ Прочитано' : '📬 Непрочитано'}
-                      </div>
-                      <div style={{ marginTop: '12px', padding: '12px', backgroundColor: '#f5f5f5', borderRadius: '4px' }}>
-                        <strong>Текст звіту:</strong>
-                        <div style={{ marginTop: '8px', whiteSpace: 'pre-wrap' }}>
-                          {report.message_text || <span style={{ color: '#999', fontStyle: 'italic' }}>Текст відсутній</span>}
+
+                      {(() => {
+                        const filteredReports =
+                          reportsFilter === 'all'
+                            ? reports
+                            : reports.filter((r) => (reportsFilter === 'read' ? r.status === 'read' : r.status === 'unread'))
+
+                        if (filteredReports.length === 0) {
+                          return <p>Звіти за вибраним фільтром не знайдені</p>
+                        }
+
+                        return (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                            {filteredReports.map((report) => (
+                              <div key={report.id} style={{ border: '1px solid #ddd', borderRadius: '8px', padding: '16px' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                                  <div>
+                                    <strong>ID:</strong> {report.id}
+                                  </div>
+                                  <div style={{ fontSize: '12px', color: '#666' }}>
+                                    {new Date(report.created_at).toLocaleString('uk-UA')}
+                                  </div>
+                                </div>
+                                <div style={{ marginBottom: '8px' }}>
+                                  <strong>Тип:</strong> {report.message_type}
+                                </div>
+                                <div style={{ marginBottom: '8px' }}>
+                                  <strong>Статус:</strong> {report.status === 'read' ? '✅ Прочитано' : '📬 Непрочитано'}
+                                </div>
+                                <div style={{ marginBottom: '8px' }}>
+                                  <strong>👤 Воркер:</strong> {report.worker_chat_id}
+                                  {workersPointsMap[report.worker_chat_id] !== undefined && (
+                                    <span style={{ marginLeft: '8px', color: '#4f46e5', fontWeight: 600 }}>
+                                      · ⭐ Бали: {workersPointsMap[report.worker_chat_id]}
+                                    </span>
+                                  )}
+                                </div>
+                                <div style={{ marginTop: '12px', padding: '12px', backgroundColor: '#f5f5f5', borderRadius: '4px' }}>
+                                  <strong>Текст звіту:</strong>
+                                  <div style={{ marginTop: '8px', whiteSpace: 'pre-wrap' }}>
+                                    {report.message_text || <span style={{ color: '#999', fontStyle: 'italic' }}>Текст відсутній</span>}
+                                  </div>
+                                </div>
+                                {report.file_id && (
+                                  <div style={{ marginTop: '8px', fontSize: '12px', color: '#666' }}>
+                                    <strong>File ID:</strong> {report.file_id}
+                                  </div>
+                                )}
+
+                                {/* Кнопки для нарахування / зняття балів по цьому звіту */}
+                                <div style={{ marginTop: '12px', display: 'flex', gap: '8px' }}>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setPointsAction('add')
+                                      setPointsAmount('')
+                                      setPointsReason('')
+                                      openPointsModalForReport(report)
+                                    }}
+                                    style={{
+                                      padding: '6px 12px',
+                                      borderRadius: '6px',
+                                      border: '1px solid #10b981',
+                                      backgroundColor: '#ecfdf5',
+                                      color: '#047857',
+                                      fontSize: '12px',
+                                      cursor: 'pointer'
+                                    }}
+                                  >
+                                    ➕ Нарахувати бали
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setPointsAction('remove')
+                                      setPointsAmount('')
+                                      setPointsReason('')
+                                      openPointsModalForReport(report)
+                                    }}
+                                    style={{
+                                      padding: '6px 12px',
+                                      borderRadius: '6px',
+                                      border: '1px solid #f97316',
+                                      backgroundColor: '#fff7ed',
+                                      color: '#c2410c',
+                                      fontSize: '12px',
+                                      cursor: 'pointer'
+                                    }}
+                                  >
+                                    ➖ Зняти бали
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )
+                      })()}
+                    </>
+                  ) : (
+                    // Таба "Воркери" – агрегуємо звіти по воркерам
+                    (() => {
+                      const workersMap = new Map<
+                        number,
+                        {
+                          worker_chat_id: number
+                          total: number
+                          unread: number
+                        }
+                      >()
+
+                      reports.forEach((r) => {
+                        const existing = workersMap.get(r.worker_chat_id) || {
+                          worker_chat_id: r.worker_chat_id,
+                          total: 0,
+                          unread: 0
+                        }
+                        existing.total += 1
+                        if (r.status === 'unread') {
+                          existing.unread += 1
+                        }
+                        workersMap.set(r.worker_chat_id, existing)
+                      })
+
+                      const workersArray = Array.from(workersMap.values())
+
+                      if (workersArray.length === 0) {
+                        return <p>Воркери зі звітами не знайдені</p>
+                      }
+
+                      return (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                          {workersArray.map((w) => (
+                            <div
+                              key={w.worker_chat_id}
+                              style={{
+                                border: '1px solid #e5e7eb',
+                                borderRadius: '8px',
+                                padding: '12px',
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center'
+                              }}
+                            >
+                              <div>
+                                <div style={{ fontWeight: 600 }}>👤 Worker ID: {w.worker_chat_id}</div>
+                                <div style={{ fontSize: '12px', color: '#4b5563', marginTop: '4px' }}>
+                                  Всього звітів: {w.total} · Непрочитаних: {w.unread}
+                                  {workersPointsMap[w.worker_chat_id] !== undefined && (
+                                    <span style={{ marginLeft: '8px', color: '#4f46e5', fontWeight: 600 }}>
+                                      · ⭐ Бали: {workersPointsMap[w.worker_chat_id]}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              <div style={{ display: 'flex', gap: '8px' }}>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setPointsAction('add')
+                                    setPointsAmount('')
+                                    setPointsReason('')
+                                    openPointsModalForWorker(w.worker_chat_id)
+                                  }}
+                                  style={{
+                                    padding: '6px 12px',
+                                    borderRadius: '6px',
+                                    border: '1px solid #10b981',
+                                    backgroundColor: '#ecfdf5',
+                                    color: '#047857',
+                                    fontSize: '12px',
+                                    cursor: 'pointer'
+                                  }}
+                                >
+                                  ➕ Нарахувати
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setPointsAction('remove')
+                                    setPointsAmount('')
+                                    setPointsReason('')
+                                    openPointsModalForWorker(w.worker_chat_id)
+                                  }}
+                                  style={{
+                                    padding: '6px 12px',
+                                    borderRadius: '6px',
+                                    border: '1px solid #f97316',
+                                    backgroundColor: '#fff7ed',
+                                    color: '#c2410c',
+                                    fontSize: '12px',
+                                    cursor: 'pointer'
+                                  }}
+                                >
+                                  ➖ Зняти
+                                </button>
+                              </div>
+                            </div>
+                          ))}
                         </div>
-                      </div>
-                      {report.file_id && (
-                        <div style={{ marginTop: '8px', fontSize: '12px', color: '#666' }}>
-                          <strong>File ID:</strong> {report.file_id}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
+                      )
+                    })()
+                  )}
+                </>
               )}
             </div>
           </div>
@@ -3670,6 +4136,181 @@ https://t.me/+faqFs28Xnx85Mjdi`
                   ))}
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Модальне вікно для балів воркера */}
+      {pointsModal && (
+        <div
+          className="admin-trading-modal-overlay"
+          onClick={() => {
+            if (!loadingPoints) {
+              setPointsModal(null)
+              setPointsAmount('')
+              setPointsReason('')
+              setWorkerPointsBalance(null)
+              setPointsHistory([])
+            }
+          }}
+        >
+          <div
+            className="admin-trading-modal"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: '520px', maxHeight: '90vh', overflow: 'auto' }}
+          >
+            <div className="admin-trading-modal-header">
+              <h2>{pointsAction === 'add' ? '➕ Нарахувати бали воркеру' : '➖ Зняти бали з воркера'}</h2>
+              <button
+                className="admin-trading-modal-close"
+                type="button"
+                onClick={() => {
+                  if (!loadingPoints) {
+                    setPointsModal(null)
+                    setPointsAmount('')
+                    setPointsReason('')
+                    setWorkerPointsBalance(null)
+                    setPointsHistory([])
+                  }
+                }}
+              >
+                ×
+              </button>
+            </div>
+            <div className="admin-trading-modal-content" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div style={{ fontSize: '14px', color: '#4b5563' }}>
+                <div>
+                  <strong>Worker chat ID:</strong> {pointsModal.workerChatId}
+                </div>
+                {workerPointsBalance !== null && (
+                  <div style={{ marginTop: '4px' }}>
+                    <strong>Поточний баланс балів:</strong> {workerPointsBalance}
+                  </div>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  type="button"
+                  onClick={() => setPointsAction('add')}
+                  style={{
+                    flex: 1,
+                    padding: '8px 12px',
+                    borderRadius: '6px',
+                    border: pointsAction === 'add' ? '2px solid #10b981' : '1px solid #d1d5db',
+                    backgroundColor: pointsAction === 'add' ? '#ecfdf5' : '#f9fafb',
+                    color: '#047857',
+                    fontWeight: 600,
+                    cursor: 'pointer'
+                  }}
+                >
+                  ➕ Нарахувати
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPointsAction('remove')}
+                  style={{
+                    flex: 1,
+                    padding: '8px 12px',
+                    borderRadius: '6px',
+                    border: pointsAction === 'remove' ? '2px solid #f97316' : '1px solid #d1d5db',
+                    backgroundColor: pointsAction === 'remove' ? '#fff7ed' : '#f9fafb',
+                    color: '#c2410c',
+                    fontWeight: 600,
+                    cursor: 'pointer'
+                  }}
+                >
+                  ➖ Зняти
+                </button>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', marginBottom: '4px' }}>Кількість балів</label>
+                <input
+                  type="number"
+                  value={pointsAmount}
+                  onChange={(e) => setPointsAmount(e.target.value)}
+                  placeholder="Наприклад, 5"
+                  style={{
+                    width: '100%',
+                    padding: '8px 10px',
+                    borderRadius: '6px',
+                    border: '1px solid #d1d5db',
+                    fontSize: '14px'
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', marginBottom: '4px' }}>Причина (необов'язково)</label>
+                <textarea
+                  value={pointsReason}
+                  onChange={(e) => setPointsReason(e.target.value)}
+                  rows={3}
+                  placeholder="За що саме нараховуємо / знімаємо бали"
+                  style={{
+                    width: '100%',
+                    padding: '8px 10px',
+                    borderRadius: '6px',
+                    border: '1px solid #d1d5db',
+                    fontSize: '14px',
+                    resize: 'vertical'
+                  }}
+                />
+              </div>
+
+              <button
+                type="button"
+                onClick={handleSubmitPoints}
+                disabled={loadingPoints}
+                style={{
+                  marginTop: '4px',
+                  padding: '10px 14px',
+                  borderRadius: '8px',
+                  border: 'none',
+                  backgroundColor: pointsAction === 'add' ? '#22c55e' : '#f97316',
+                  color: '#fff',
+                  fontWeight: 600,
+                  cursor: loadingPoints ? 'default' : 'pointer',
+                  opacity: loadingPoints ? 0.7 : 1
+                }}
+              >
+                {loadingPoints ? 'Збереження...' : pointsAction === 'add' ? 'Нарахувати бали' : 'Зняти бали'}
+              </button>
+
+              <div style={{ marginTop: '8px' }}>
+                <h3 style={{ fontSize: '14px', fontWeight: 600, marginBottom: '8px' }}>Історія балів</h3>
+                {loadingPoints && pointsHistory.length === 0 ? (
+                  <p>Завантаження історії...</p>
+                ) : pointsHistory.length === 0 ? (
+                  <p style={{ fontSize: '13px', color: '#6b7280' }}>Історія по балах ще пуста.</p>
+                ) : (
+                  <div style={{ maxHeight: '220px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {pointsHistory.map((p) => (
+                      <div
+                        key={p.id}
+                        style={{
+                          border: '1px solid #e5e7eb',
+                          borderRadius: '6px',
+                          padding: '8px 10px',
+                          fontSize: '13px'
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                          <span>
+                            {p.points > 0 ? '➕' : '➖'} {Math.abs(p.points)} балів
+                          </span>
+                          <span style={{ color: '#6b7280' }}>
+                            {new Date(p.created_at).toLocaleString('uk-UA', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' })}
+                          </span>
+                        </div>
+                        {p.reason && <div style={{ color: '#4b5563' }}>{p.reason}</div>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
