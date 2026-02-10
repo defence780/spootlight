@@ -545,7 +545,6 @@ const AdminTradingPage = () => {
   const fetchAllWorkersPoints = async (closerChatId: number, workerChatIds: number[]) => {
     if (workerChatIds.length === 0) return
 
-    setLoadingWorkersPoints(true)
     try {
       const pointsMap: Record<number, number> = {}
 
@@ -586,8 +585,6 @@ const AdminTradingPage = () => {
       setWorkersPointsMap(pointsMap)
     } catch (err) {
       console.error('[POINTS] Error fetching all workers points:', err)
-    } finally {
-      setLoadingWorkersPoints(false)
     }
   }
 
