@@ -3838,7 +3838,7 @@ https://t.me/+faqFs28Xnx85Mjdi`
                                 </div>
                                 <div style={{ marginTop: '12px', padding: '12px', backgroundColor: '#f5f5f5', borderRadius: '4px' }}>
                                   <strong>Текст звіту:</strong>
-                                  <div style={{ marginTop: '8px', whiteSpace: 'pre-wrap' }}>
+                                  <div style={{ marginTop: '8px', whiteSpace: 'pre-wrap', color: '#000' }}>
                                     {report.message_text || <span style={{ color: '#999', fontStyle: 'italic' }}>Текст відсутній</span>}
                                   </div>
                                 </div>
