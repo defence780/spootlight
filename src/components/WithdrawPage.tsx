@@ -7,6 +7,17 @@ import './WithdrawPage.css'
 const STORAGE_KEY = 'spotlight_user'
 
 type SubmitStatus = 'idle' | 'success'
+type WithdrawalStatus = 'pending' | 'completed' | 'rejected'
+
+interface WithdrawalHistory {
+  id: string
+  amount: number | string | null
+  address: string | null
+  network: string | null
+  comment?: string | null
+  status: WithdrawalStatus | null
+  created_at?: string
+}
 
 const parseBalanceValue = (value: unknown): number | null => {
   if (typeof value === 'number' && !Number.isNaN(value)) {
@@ -34,6 +45,9 @@ const WithdrawPage = () => {
   const [submitLoading, setSubmitLoading] = useState(false)
   const [status, setStatus] = useState<SubmitStatus>('idle')
   const [isNetworkDropdownOpen, setIsNetworkDropdownOpen] = useState(false)
+  const [withdrawalHistory, setWithdrawalHistory] = useState<WithdrawalHistory[]>([])
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [showHistory, setShowHistory] = useState(false)
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -82,6 +96,33 @@ const WithdrawPage = () => {
 
     fetchBalance()
   }, [userEmail])
+
+  const fetchWithdrawalHistory = async () => {
+    if (!userEmail) return
+
+    setHistoryLoading(true)
+    try {
+      const { data, error } = await supabase
+        .from('spotlights_withdrawals')
+        .select('id, amount, address, network, comment, status, created_at')
+        .eq('email', userEmail)
+        .order('created_at', { ascending: false })
+
+      if (error) throw error
+
+      setWithdrawalHistory(data ?? [])
+    } catch (err) {
+      console.error('Не удалось загрузить историю выводов', err)
+    } finally {
+      setHistoryLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (showHistory && userEmail) {
+      fetchWithdrawalHistory()
+    }
+  }, [showHistory, userEmail])
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -205,11 +246,36 @@ const WithdrawPage = () => {
       }
 
       resetForm()
+      // Оновлюємо історію виводів, якщо вона відкрита
+      if (showHistory) {
+        fetchWithdrawalHistory()
+      }
     } catch (submitError) {
       console.error('Неожиданная ошибка при создании заявки на вывод', submitError)
       setFormError('Произошла ошибка. Попробуйте снова позже.')
     } finally {
       setSubmitLoading(false)
+    }
+  }
+
+  const formatStatus = (status: WithdrawalStatus | null): string => {
+    switch (status) {
+      case 'completed':
+        return 'Выполнено'
+      case 'rejected':
+        return 'Отклонено'
+      case 'pending':
+      default:
+        return 'В ожидании'
+    }
+  }
+
+  const formatDate = (value?: string | null) => {
+    if (!value) return '—'
+    try {
+      return new Date(value).toLocaleString('ru-RU')
+    } catch (err) {
+      return value
     }
   }
 
@@ -324,12 +390,83 @@ const WithdrawPage = () => {
           )}
 
           <div className="withdraw-actions">
-
             <button type="submit" className="withdraw-primary-button" disabled={submitLoading}>
               {submitLoading ? 'Отправка...' : 'Отправить заявку'}
             </button>
           </div>
         </form>
+
+        <div className="withdraw-history-section">
+          <button
+            type="button"
+            className="withdraw-history-toggle"
+            onClick={() => setShowHistory(!showHistory)}
+          >
+            <span>{showHistory ? '▼' : '▶'}</span>
+            <span>История выводов</span>
+          </button>
+
+          {showHistory && (
+            <div className="withdraw-history-content">
+              {historyLoading ? (
+                <div className="withdraw-history-loading">Загрузка...</div>
+              ) : withdrawalHistory.length === 0 ? (
+                <div className="withdraw-history-empty">История выводов пуста</div>
+              ) : (
+                <div className="withdraw-history-list">
+                  {withdrawalHistory.map((item) => {
+                    const amount = parseBalanceValue(item.amount)
+                    const networkKey = item.network
+                      ? (Object.keys(NETWORKS).find(
+                          (key) => key.toLowerCase() === item.network?.toLowerCase()
+                        ) as NetworkKey | undefined)
+                      : null
+                    const networkLabel = networkKey ? NETWORKS[networkKey].label : item.network?.toUpperCase() || '—'
+
+                    return (
+                      <div key={item.id} className="withdraw-history-item">
+                        <div className="withdraw-history-row">
+                          <span className="withdraw-history-label">Сумма:</span>
+                          <span className="withdraw-history-value">
+                            {amount !== null ? `${amount.toFixed(2)} USDT` : '—'}
+                          </span>
+                        </div>
+                        <div className="withdraw-history-row">
+                          <span className="withdraw-history-label">Сеть:</span>
+                          <span className="withdraw-history-value">{networkLabel}</span>
+                        </div>
+                        <div className="withdraw-history-row">
+                          <span className="withdraw-history-label">Адрес:</span>
+                          <span className="withdraw-history-value withdraw-history-address">
+                            {item.address ?? '—'}
+                          </span>
+                        </div>
+                        {item.comment && (
+                          <div className="withdraw-history-row">
+                            <span className="withdraw-history-label">Комментарий:</span>
+                            <span className="withdraw-history-value">{item.comment}</span>
+                          </div>
+                        )}
+                        <div className="withdraw-history-row">
+                          <span className="withdraw-history-label">Статус:</span>
+                          <span
+                            className={`withdraw-history-status withdraw-history-status--${item.status ?? 'pending'}`}
+                          >
+                            {formatStatus(item.status ?? 'pending')}
+                          </span>
+                        </div>
+                        <div className="withdraw-history-row">
+                          <span className="withdraw-history-label">Дата:</span>
+                          <span className="withdraw-history-value">{formatDate(item.created_at)}</span>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )

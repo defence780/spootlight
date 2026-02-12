@@ -387,6 +387,124 @@
   box-shadow: none;
 }
 
+.withdraw-history-section {
+  margin-top: 2.5rem;
+  padding-top: 2.5rem;
+  border-top: 1px solid rgba(102, 126, 234, 0.2);
+}
+
+.withdraw-history-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  background: transparent;
+  border: none;
+  color: #e7e9ff;
+  font-size: 1.1rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0.5rem 0;
+  transition: color 0.2s ease;
+}
+
+.withdraw-history-toggle:hover {
+  color: #c8cbff;
+}
+
+.withdraw-history-toggle span:first-child {
+  font-size: 0.8rem;
+  transition: transform 0.2s ease;
+}
+
+.withdraw-history-content {
+  margin-top: 1.5rem;
+}
+
+.withdraw-history-loading,
+.withdraw-history-empty {
+  text-align: center;
+  padding: 2rem 1rem;
+  color: #a4a8d8;
+  font-size: 0.95rem;
+  background: rgba(12, 12, 22, 0.85);
+  border-radius: 14px;
+  border: 1px dashed rgba(102, 126, 234, 0.35);
+}
+
+.withdraw-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.withdraw-history-item {
+  background: rgba(12, 12, 22, 0.85);
+  border: 1px solid rgba(102, 126, 234, 0.25);
+  border-radius: 14px;
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.withdraw-history-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: flex-start;
+}
+
+.withdraw-history-label {
+  font-size: 0.85rem;
+  color: #9095c5;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  min-width: 100px;
+  flex-shrink: 0;
+}
+
+.withdraw-history-value {
+  font-size: 0.95rem;
+  color: #e7e9ff;
+  word-break: break-word;
+  flex: 1;
+}
+
+.withdraw-history-address {
+  font-family: 'Roboto Mono', 'Fira Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+    'Courier New', monospace;
+  font-size: 0.9rem;
+}
+
+.withdraw-history-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 0.3rem 0.8rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.015em;
+}
+
+.withdraw-history-status--pending {
+  background: rgba(249, 199, 79, 0.18);
+  border: 1px solid rgba(249, 199, 79, 0.4);
+  color: #ffe4a3;
+}
+
+.withdraw-history-status--completed {
+  background: rgba(46, 204, 113, 0.18);
+  border: 1px solid rgba(46, 204, 113, 0.4);
+  color: #c9f7d9;
+}
+
+.withdraw-history-status--rejected {
+  background: rgba(239, 68, 68, 0.18);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #ffb2b2;
+}
+
 @media (max-width: 720px) {
   .withdraw-card {
     padding: 2rem;
@@ -408,6 +526,15 @@
   .withdraw-secondary-button,
   .withdraw-primary-button {
     width: 100%;
+    min-width: unset;
+  }
+
+  .withdraw-history-row {
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .withdraw-history-label {
     min-width: unset;
   }
 }
