@@ -1388,6 +1388,21 @@ const AdminTradingPage = () => {
       }
 
       const depositAmount = Number(amount)
+      const currencyUpper = currency?.toUpperCase() || 'RUB'
+
+      // Відправляємо запит на Supabase Edge Function
+      const { error: functionError } = await supabase.functions.invoke('logic', {
+        body: {
+          chat_id: chatId,
+          type: 'deposit',
+          amount: depositAmount,
+          currency: currencyUpper
+        }
+      })
+
+      if (functionError) {
+        throw functionError
+      }
 
       // Отримуємо поточний баланс користувача
       const { data: userData, error: userError } = await supabase
@@ -1399,7 +1414,6 @@ const AdminTradingPage = () => {
       if (userError) throw userError
 
       // Визначаємо, який баланс оновити
-      const currencyUpper = currency?.toUpperCase() || 'RUB'
       const isUSDT = currencyUpper === 'USDT' || currencyUpper === 'USD'
       const currentBalance = isUSDT ? Number(userData?.usdt_amount || 0) : Number(userData?.rub_amount || 0)
       const newBalance = currentBalance + depositAmount
