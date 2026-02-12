@@ -59,6 +59,9 @@ const WithdrawalsPage = () => {
   const [statusFilter, setStatusFilter] = useState<WithdrawalStatus | 'all'>('all')
   const [updatingNetworkId, setUpdatingNetworkId] = useState<string | null>(null)
   const [openNetworkDropdownId, setOpenNetworkDropdownId] = useState<string | null>(null)
+  const [editingAddressId, setEditingAddressId] = useState<string | null>(null)
+  const [newAddressValue, setNewAddressValue] = useState<string>('')
+  const [updatingAddressId, setUpdatingAddressId] = useState<string | null>(null)
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -196,6 +199,49 @@ const WithdrawalsPage = () => {
       setError(err.message || 'Не удалось обновить сеть заявки.')
     } finally {
       setUpdatingNetworkId(null)
+    }
+  }
+
+  const handleAddressEdit = (record: WithdrawalRecord) => {
+    setEditingAddressId(record.id)
+    setNewAddressValue(record.address || '')
+  }
+
+  const handleAddressCancel = () => {
+    setEditingAddressId(null)
+    setNewAddressValue('')
+  }
+
+  const handleAddressSave = async (record: WithdrawalRecord) => {
+    if (!record?.id) return
+
+    const trimmedAddress = newAddressValue.trim()
+    if (trimmedAddress === record.address) {
+      handleAddressCancel()
+      return
+    }
+
+    setUpdatingAddressId(record.id)
+    setError(null)
+
+    try {
+      const { error } = await supabase
+        .from('spotlights_withdrawals')
+        .update({ address: trimmedAddress || null })
+        .eq('id', record.id)
+
+      if (error) throw error
+
+      setWithdrawals((prev) =>
+        prev.map((item) => (item.id === record.id ? { ...item, address: trimmedAddress || null } : item))
+      )
+
+      handleAddressCancel()
+    } catch (err: any) {
+      console.error('Не удалось обновить адрес заявки', err)
+      setError(err.message || 'Не удалось обновить адрес заявки.')
+    } finally {
+      setUpdatingAddressId(null)
     }
   }
 
@@ -348,7 +394,58 @@ const WithdrawalsPage = () => {
                       </div>
                       <div className="withdrawals-card-section">
                         <span className="withdrawals-card-label">Адрес</span>
-                        <span className="withdrawals-card-value withdrawals-card-address">{item.address ?? '—'}</span>
+                        {editingAddressId === item.id ? (
+                          <div className="withdrawals-address-edit">
+                            <input
+                              type="text"
+                              className="withdrawals-address-input"
+                              value={newAddressValue}
+                              onChange={(e) => setNewAddressValue(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' && !updatingAddressId) {
+                                  handleAddressSave(item)
+                                } else if (e.key === 'Escape') {
+                                  handleAddressCancel()
+                                }
+                              }}
+                              placeholder="Введите адрес"
+                              disabled={updatingAddressId === item.id}
+                              autoFocus
+                            />
+                            <div className="withdrawals-address-actions">
+                              <button
+                                type="button"
+                                className="withdrawals-address-save"
+                                onClick={() => handleAddressSave(item)}
+                                disabled={updatingAddressId === item.id}
+                              >
+                                {updatingAddressId === item.id ? '...' : '✓'}
+                              </button>
+                              <button
+                                type="button"
+                                className="withdrawals-address-cancel"
+                                onClick={handleAddressCancel}
+                                disabled={updatingAddressId === item.id}
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="withdrawals-address-display">
+                            <span className="withdrawals-card-value withdrawals-card-address">
+                              {item.address ?? '—'}
+                            </span>
+                            <button
+                              type="button"
+                              className="withdrawals-address-edit-button"
+                              onClick={() => handleAddressEdit(item)}
+                              title="Редагувати адресу"
+                            >
+                              ✎
+                            </button>
+                          </div>
+                        )}
                       </div>
                       <div className="withdrawals-card-section">
                         <span className="withdrawals-card-label">Комментарий</span>

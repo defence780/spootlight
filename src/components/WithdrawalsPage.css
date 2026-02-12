@@ -192,6 +192,107 @@
   font-size: 0.95rem;
 }
 
+.withdrawals-address-display {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.withdrawals-address-edit-button {
+  background: rgba(102, 126, 234, 0.2);
+  border: 1px solid rgba(102, 126, 234, 0.4);
+  border-radius: 6px;
+  padding: 0.35rem 0.5rem;
+  color: #c8cbff;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.withdrawals-address-edit-button:hover {
+  background: rgba(102, 126, 234, 0.3);
+  border-color: rgba(102, 126, 234, 0.6);
+}
+
+.withdrawals-address-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.withdrawals-address-input {
+  width: 100%;
+  background: rgba(12, 12, 18, 0.85);
+  border: 1px solid rgba(102, 126, 234, 0.4);
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem;
+  color: #e7e9ff;
+  font-size: 0.95rem;
+  font-family: 'Roboto Mono', 'Fira Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+    'Courier New', monospace;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.withdrawals-address-input:focus {
+  border-color: rgba(102, 126, 234, 0.7);
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.2);
+}
+
+.withdrawals-address-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.withdrawals-address-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.withdrawals-address-save,
+.withdrawals-address-cancel {
+  background: rgba(102, 126, 234, 0.2);
+  border: 1px solid rgba(102, 126, 234, 0.4);
+  border-radius: 6px;
+  padding: 0.4rem 0.65rem;
+  color: #e7e9ff;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+  line-height: 1;
+}
+
+.withdrawals-address-save {
+  background: rgba(46, 204, 113, 0.2);
+  border-color: rgba(46, 204, 113, 0.4);
+  color: #c9f7d9;
+}
+
+.withdrawals-address-save:hover:not(:disabled) {
+  background: rgba(46, 204, 113, 0.3);
+  border-color: rgba(46, 204, 113, 0.6);
+}
+
+.withdrawals-address-cancel {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: rgba(239, 68, 68, 0.4);
+  color: #ffb2b2;
+}
+
+.withdrawals-address-cancel:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.3);
+  border-color: rgba(239, 68, 68, 0.6);
+}
+
+.withdrawals-address-save:disabled,
+.withdrawals-address-cancel:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .withdrawals-network-dropdown {
   position: relative;
   width: 100%;
