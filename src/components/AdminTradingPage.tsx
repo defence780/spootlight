@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { X, RotateCcw, RefreshCw, User, Check } from 'lucide-react'
+import { X, RotateCcw, RefreshCw, User, Check, Search } from 'lucide-react'
 import './AdminTradingPage.css'
 import { DEFAULT_TRADING_TAB, TRADING_TABS, TradingTabKey } from '../types/trading'
 
@@ -33,6 +33,10 @@ interface Worker {
   panel_disabled?: boolean
   worker_comment?: string | null
   usersCount?: number
+  blocked?: boolean
+  closerComment?: string | null
+  closerName?: string | null
+  closerUsername?: string | null
 }
 
 interface NewEmployeeMessage {
@@ -171,6 +175,10 @@ const AdminTradingPage = () => {
   const [workerPointsBalance, setWorkerPointsBalance] = useState<number | null>(null)
   const [pointsHistory, setPointsHistory] = useState<WorkerPoint[]>([])
   const [workersPointsMap, setWorkersPointsMap] = useState<Record<number, number>>({})
+  const [workersSearchQuery, setWorkersSearchQuery] = useState<string>('')
+  const [workersViewMode, setWorkersViewMode] = useState<'workers' | 'allUsers'>('workers')
+  const [allUsers, setAllUsers] = useState<Worker[]>([])
+  const [allUsersTotalCount, setAllUsersTotalCount] = useState<number>(0)
   const [reportWorkersInfo, setReportWorkersInfo] = useState<
     Record<
       number,
@@ -281,6 +289,141 @@ const AdminTradingPage = () => {
 
     checkAccess()
   }, [navigate])
+
+  // Скидаємо сторінку при зміні пошукового запиту або режиму перегляду
+  useEffect(() => {
+    setCurrentWorkersPage(1)
+  }, [workersSearchQuery, workersViewMode])
+
+  // Завантажуємо користувачів з пагінацією
+  const fetchAllUsers = async () => {
+    console.log('[FETCH_ALL_USERS] Starting fetchAllUsers, page:', currentWorkersPage)
+    setLoading(true)
+    setError(null)
+    try {
+      // Спочатку отримуємо загальну кількість для пагінації
+      let countQuery = supabase
+        .from('users')
+        .select('*', { count: 'exact', head: true })
+
+      if (currentUserRefId) {
+        countQuery = countQuery.eq('ref_id', currentUserRefId)
+      }
+
+      const { count: totalCount } = await countQuery
+
+      // Завантажуємо тільки потрібну сторінку
+      const startIndex = (currentWorkersPage - 1) * itemsPerPage
+      let query = supabase
+        .from('users')
+        .select('id, created_at, chat_id, isAdmin, username, first_name, ref_id, balance, auto_win, is_trading_enable, spam, usdt_amount, rub_amount, verification_on, verification_needed, is_message_sending, comment, panel_disabled, worker_comment, blocked')
+
+      if (currentUserRefId) {
+        query = query.eq('ref_id', currentUserRefId)
+      }
+
+      const { data, error: fetchError } = await query
+        .order('created_at', { ascending: false })
+        .range(startIndex, startIndex + itemsPerPage - 1)
+
+      if (fetchError) {
+        console.error('Supabase error:', fetchError)
+        throw fetchError
+      }
+
+      const usersData = data || []
+
+      // Збираємо унікальні ref_id для оптимізації запитів
+      const uniqueRefIds = [...new Set(usersData.filter(u => u.ref_id).map(u => u.ref_id))] as (string | number)[]
+      const uniqueWorkerChatIds = [...new Set(usersData.filter(u => u.worker_comment && u.chat_id).map(u => u.chat_id))] as (string | number)[]
+
+      // Завантажуємо інформацію про клоузерів одним запитом
+      const closerInfoMap: Record<string | number, { worker_comment: string | null; first_name: string | null; username: string | null }> = {}
+      if (uniqueRefIds.length > 0) {
+        const { data: closersData } = await supabase
+          .from('users')
+          .select('chat_id, worker_comment, first_name, username')
+          .in('chat_id', uniqueRefIds)
+
+        if (closersData) {
+          closersData.forEach(closer => {
+            if (closer.chat_id) {
+              closerInfoMap[closer.chat_id] = {
+                worker_comment: closer.worker_comment,
+                first_name: closer.first_name,
+                username: closer.username
+              }
+            }
+          })
+        }
+      }
+
+      // Підраховуємо кількість користувачів для клоузерів одним запитом
+      const usersCountMap: Record<string | number, number> = {}
+      if (uniqueWorkerChatIds.length > 0) {
+        await Promise.all(
+          uniqueWorkerChatIds.map(async (workerChatId) => {
+            const { count } = await supabase
+              .from('users')
+              .select('*', { count: 'exact', head: true })
+              .eq('ref_id', workerChatId)
+
+            usersCountMap[workerChatId] = count || 0
+          })
+        )
+      }
+
+      // Об'єднуємо дані
+      const usersWithCounts = usersData.map((user) => {
+        // Якщо це клоузер
+        if (user.worker_comment && user.chat_id) {
+          return { ...user, usersCount: usersCountMap[user.chat_id] || 0 }
+        }
+
+        // Якщо це користувач з ref_id
+        if (user.ref_id && closerInfoMap[user.ref_id]) {
+          const closerInfo = closerInfoMap[user.ref_id]
+          return {
+            ...user,
+            usersCount: 0,
+            closerComment: closerInfo.worker_comment,
+            closerName: closerInfo.first_name,
+            closerUsername: closerInfo.username
+          }
+        }
+
+        return { ...user, usersCount: 0 }
+      })
+
+      // Зберігаємо дані та загальну кількість для пагінації
+      setAllUsers(usersWithCounts)
+      setAllUsersTotalCount(totalCount || 0)
+      
+      // Якщо поточна сторінка більша за загальну кількість, скидаємо на 1
+      if (totalCount !== null && totalCount > 0) {
+        const totalPages = Math.ceil(totalCount / itemsPerPage)
+        if (currentWorkersPage > totalPages && totalPages > 0) {
+          setCurrentWorkersPage(1)
+        }
+      }
+    } catch (err: any) {
+      console.error('Ошибка загрузки всех пользователей', err)
+      setError(err.message || 'Не удалось загрузить всех пользователей.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Завантажуємо дані залежно від режиму перегляду
+  useEffect(() => {
+    if (activeTab === 'workers' && initialized) {
+      if (workersViewMode === 'workers') {
+        fetchWorkers()
+      } else {
+        fetchAllUsers()
+      }
+    }
+  }, [workersViewMode, activeTab, initialized, currentWorkersPage])
 
   const fetchWorkers = async () => {
     console.log('[FETCH_WORKERS] Starting fetchWorkers')
@@ -1812,7 +1955,11 @@ https://t.me/+faqFs28Xnx85Mjdi`
   useEffect(() => {
     if (!initialized) return
     if (activeTab === 'workers') {
-      fetchWorkers()
+      if (workersViewMode === 'workers') {
+        fetchWorkers()
+      } else {
+        fetchAllUsers()
+      }
       setCurrentWorkersPage(1)
     } else if (activeTab === 'withdrawals') {
       fetchWithdrawals()
@@ -2005,14 +2152,82 @@ https://t.me/+faqFs28Xnx85Mjdi`
             <>
               {activeTab === 'workers' && (
                 <>
-                  {workers.length === 0 ? (
-                    <div className="admin-trading-empty">
-                      <p>Клоузери не знайдені</p>
+                  <div style={{ display: 'flex', gap: '20px', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap' }}>
+                    <div className="worker-users-search-wrapper" style={{ flex: 1, minWidth: '300px' }}>
+                      <div className="worker-users-search">
+                        <Search size={20} className="worker-users-search-icon" />
+                        <input
+                          type="text"
+                          className="worker-users-search-input"
+                          placeholder={workersViewMode === 'workers' ? "Пошук за username, ім'ям або chat_id..." : "Пошук за username, ім'ям, chat_id або коментарем..."}
+                          value={workersSearchQuery}
+                          onChange={(e) => setWorkersSearchQuery(e.target.value)}
+                        />
+                        {workersSearchQuery && (
+                          <button
+                            className="worker-users-search-clear"
+                            onClick={() => setWorkersSearchQuery('')}
+                            title="Очистити пошук"
+                          >
+                            <X size={16} />
+                          </button>
+                        )}
+                      </div>
                     </div>
-                  ) : (
+                    <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                      <button
+                        onClick={() => setWorkersViewMode('workers')}
+                        style={{
+                          padding: '8px 16px',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          backgroundColor: workersViewMode === 'workers' ? '#4CAF50' : 'var(--card-background, #1a1a1a)',
+                          color: workersViewMode === 'workers' ? '#fff' : 'var(--text-color, #fff)',
+                          border: workersViewMode === 'workers' ? '1px solid #4CAF50' : '1px solid var(--border-color, #333)',
+                          fontWeight: workersViewMode === 'workers' ? '600' : '400',
+                          transition: 'all 0.2s'
+                        }}
+                      >
+                        Клоузери
+                      </button>
+                      <button
+                        onClick={() => setWorkersViewMode('allUsers')}
+                        style={{
+                          padding: '8px 16px',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          backgroundColor: workersViewMode === 'allUsers' ? '#4CAF50' : 'var(--card-background, #1a1a1a)',
+                          color: workersViewMode === 'allUsers' ? '#fff' : 'var(--text-color, #fff)',
+                          border: workersViewMode === 'allUsers' ? '1px solid #4CAF50' : '1px solid var(--border-color, #333)',
+                          fontWeight: workersViewMode === 'allUsers' ? '600' : '400',
+                          transition: 'all 0.2s'
+                        }}
+                      >
+                        Всі користувачі
+                      </button>
+                    </div>
+                  </div>
+                  {workersViewMode === 'workers' ? (
                     <>
+                      {workers.length === 0 ? (
+                        <div className="admin-trading-empty">
+                          <p>Клоузери не знайдені</p>
+                        </div>
+                      ) : (
+                        <>
                       {(() => {
-                        const { paginatedData, totalPages } = getPaginatedData(workers, currentWorkersPage, itemsPerPage)
+                        // Фільтруємо workers за пошуковим запитом
+                        const filteredWorkers = workers.filter((worker) => {
+                          if (!workersSearchQuery.trim()) return true
+                          const query = workersSearchQuery.toLowerCase().trim()
+                          const username = worker.username?.toLowerCase() || ''
+                          const firstName = worker.first_name?.toLowerCase() || ''
+                          const chatId = String(worker.chat_id || '').toLowerCase()
+                          const workerComment = worker.worker_comment?.toLowerCase() || ''
+                          return username.includes(query) || firstName.includes(query) || chatId.includes(query) || workerComment.includes(query)
+                        })
+                        
+                        const { paginatedData, totalPages } = getPaginatedData(filteredWorkers, currentWorkersPage, itemsPerPage)
                         return (
                           <>
                             <Pagination
@@ -2032,7 +2247,19 @@ https://t.me/+faqFs28Xnx85Mjdi`
                               <div className="admin-trading-stats-card">
                                 <h3 className="admin-trading-stats-title">Статистика по клоузерам</h3>
                                 <div className="admin-trading-worker-stats-grid">
-                                  {workers.map((worker) => {
+                                  {(() => {
+                                    // Фільтруємо workers для статистики теж
+                                    const filteredWorkersForStats = workers.filter((worker) => {
+                                      if (!workersSearchQuery.trim()) return true
+                                      const query = workersSearchQuery.toLowerCase().trim()
+                                      const username = worker.username?.toLowerCase() || ''
+                                      const firstName = worker.first_name?.toLowerCase() || ''
+                                      const chatId = String(worker.chat_id || '').toLowerCase()
+                                      const workerComment = worker.worker_comment?.toLowerCase() || ''
+                                      return username.includes(query) || firstName.includes(query) || chatId.includes(query) || workerComment.includes(query)
+                                    })
+                                    return filteredWorkersForStats
+                                  })().map((worker) => {
                                     return (
                                       <div key={worker.id} className="admin-trading-worker-stats-item">
                                         <div className="admin-trading-worker-stats-header">
@@ -2278,6 +2505,219 @@ https://t.me/+faqFs28Xnx85Mjdi`
                           </>
                         )
                       })()}
+                    </>
+                  )}
+                  </>
+                  ) : (
+                    <>
+                      {allUsers.length === 0 ? (
+                        <div className="admin-trading-empty">
+                          <p>Користувачі не знайдені</p>
+                        </div>
+                      ) : (
+                        <>
+                          {(() => {
+                            // Фільтруємо всіх користувачів за пошуковим запитом
+                            const filteredAllUsers = allUsers.filter((user) => {
+                              if (!workersSearchQuery.trim()) return true
+                              const query = workersSearchQuery.toLowerCase().trim()
+                              const username = user.username?.toLowerCase() || ''
+                              const firstName = user.first_name?.toLowerCase() || ''
+                              const chatId = String(user.chat_id || '').toLowerCase()
+                              const comment = user.comment?.toLowerCase() || ''
+                              const workerComment = user.worker_comment?.toLowerCase() || ''
+                              const closerComment = (user as any).closerComment?.toLowerCase() || ''
+                              return username.includes(query) || firstName.includes(query) || chatId.includes(query) || comment.includes(query) || workerComment.includes(query) || closerComment.includes(query)
+                            })
+                            
+                            // Якщо є пошуковий запит, використовуємо клієнтську пагінацію
+                            // Якщо немає - використовуємо серверну пагінацію (дані вже завантажені з пагінацією)
+                            const totalPages = workersSearchQuery.trim() 
+                              ? Math.ceil(filteredAllUsers.length / itemsPerPage)
+                              : Math.ceil(allUsersTotalCount / itemsPerPage)
+                            
+                            const paginatedData = workersSearchQuery.trim()
+                              ? filteredAllUsers.slice((currentWorkersPage - 1) * itemsPerPage, currentWorkersPage * itemsPerPage)
+                              : filteredAllUsers
+                            return (
+                              <>
+                                <Pagination
+                                  currentPage={currentWorkersPage}
+                                  totalPages={totalPages}
+                                  onPageChange={setCurrentWorkersPage}
+                                />
+                                <div className="admin-trading-workers-grid">
+                                  {paginatedData.map((user) => {
+                                    const isWorker = !!user.worker_comment
+                                    
+                                    // Якщо це клоузер - показуємо картку клоузера
+                                    if (isWorker) {
+                                      return (
+                                        <div key={user.id} className="admin-trading-worker-card" style={(user.blocked ?? false) ? { opacity: 0.6 } : {}}>
+                                          <div className="admin-trading-worker-card-section">
+                                            <span className="admin-trading-worker-card-label">Тип</span>
+                                            <span className="admin-trading-worker-card-value" style={{ color: '#4CAF50', fontWeight: '600' }}>Клоузер</span>
+                                          </div>
+                                          <div className="admin-trading-worker-card-section">
+                                            <span className="admin-trading-worker-card-label">Ім'я</span>
+                                            <span className="admin-trading-worker-card-value">{user.first_name || '—'}</span>
+                                          </div>
+                                          <div className="admin-trading-worker-card-section">
+                                            <span className="admin-trading-worker-card-label">Username</span>
+                                            <span className="admin-trading-worker-card-value">
+                                              {user.username ? `@${user.username}` : '—'}
+                                            </span>
+                                          </div>
+                                          <div className="admin-trading-worker-card-section">
+                                            <span className="admin-trading-worker-card-label">Chat ID</span>
+                                            <span className="admin-trading-worker-card-value">{user.chat_id || '—'}</span>
+                                          </div>
+                                          <div className="admin-trading-worker-card-section">
+                                            <span className="admin-trading-worker-card-label">Worker Comment</span>
+                                            <span className="admin-trading-worker-card-value">{user.worker_comment || '—'}</span>
+                                          </div>
+                                          <div className="admin-trading-worker-card-section">
+                                            <span className="admin-trading-worker-card-label">Кількість користувачів</span>
+                                            <div className="admin-trading-users-count-wrapper" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                              {user.chat_id ? (
+                                                <>
+                                                  <button
+                                                    className="admin-trading-users-count-btn"
+                                                    onClick={() => navigate(`/admin/trading/worker/${user.chat_id}/users`, { state: { fromTab: activeTab } })}
+                                                    title="Переглянути користувачів"
+                                                  >
+                                                    {user.usersCount ?? 0}
+                                                  </button>
+                                                  {isSuperAdmin && (
+                                                    <button
+                                                      className="admin-trading-add-user-btn"
+                                                      onClick={() => openAddUserModal(Number(user.chat_id))}
+                                                      title="Додати користувача до клоузера"
+                                                      style={{
+                                                        background: '#4CAF50',
+                                                        color: 'white',
+                                                        border: 'none',
+                                                        borderRadius: '4px',
+                                                        width: '28px',
+                                                        height: '28px',
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        justifyContent: 'center',
+                                                        cursor: 'pointer',
+                                                        fontSize: '18px',
+                                                        fontWeight: 'bold',
+                                                        padding: 0
+                                                      }}
+                                                    >
+                                                      +
+                                                    </button>
+                                                  )}
+                                                </>
+                                              ) : (
+                                                <span className="admin-trading-worker-card-value">0</span>
+                                              )}
+                                            </div>
+                                          </div>
+                                          <div className="admin-trading-worker-card-section">
+                                            <span className="admin-trading-worker-card-label">Статус</span>
+                                            <span className="admin-trading-worker-card-value" style={{ 
+                                              color: (user.blocked ?? false) ? '#ff4444' : '#4CAF50',
+                                              fontWeight: '600'
+                                            }}>
+                                              {(user.blocked ?? false) ? 'Заблокирован' : 'Активен'}
+                                            </span>
+                                          </div>
+                                        </div>
+                                      )
+                                    }
+                                    
+                                    // Якщо це звичайний користувач - показуємо картку користувача
+                                    return (
+                                      <div key={user.id} className="admin-trading-worker-card" style={(user.blocked ?? false) ? { opacity: 0.6 } : {}}>
+                                        <div className="admin-trading-worker-card-section">
+                                          <span className="admin-trading-worker-card-label">Тип</span>
+                                          <span className="admin-trading-worker-card-value" style={{ color: '#667eea', fontWeight: '600' }}>Користувач</span>
+                                        </div>
+                                        <div className="admin-trading-worker-card-section">
+                                          <span className="admin-trading-worker-card-label">Ім'я</span>
+                                          <span className="admin-trading-worker-card-value">{user.first_name || '—'}</span>
+                                        </div>
+                                        <div className="admin-trading-worker-card-section">
+                                          <span className="admin-trading-worker-card-label">Username</span>
+                                          <span className="admin-trading-worker-card-value">
+                                            {user.username ? `@${user.username}` : '—'}
+                                          </span>
+                                        </div>
+                                        <div className="admin-trading-worker-card-section">
+                                          <span className="admin-trading-worker-card-label">Chat ID</span>
+                                          <span className="admin-trading-worker-card-value">{user.chat_id || '—'}</span>
+                                        </div>
+                                        <div className="admin-trading-worker-card-section">
+                                          <span className="admin-trading-worker-card-label">Статус</span>
+                                          <span className="admin-trading-worker-card-value" style={{ 
+                                            color: (user.blocked ?? false) ? '#ff4444' : '#4CAF50',
+                                            fontWeight: '600'
+                                          }}>
+                                            {(user.blocked ?? false) ? 'Заблокирован' : 'Активен'}
+                                          </span>
+                                        </div>
+                                        {user.comment && (
+                                          <div className="admin-trading-worker-card-section">
+                                            <span className="admin-trading-worker-card-label">Коментар</span>
+                                            <span className="admin-trading-worker-card-value">{user.comment}</span>
+                                          </div>
+                                        )}
+                                        {user.ref_id && (
+                                          <>
+                                            <div className="admin-trading-worker-card-section">
+                                              <span className="admin-trading-worker-card-label">Клоузер</span>
+                                              <div className="admin-trading-users-count-wrapper">
+                                                <button
+                                                  className="admin-trading-users-count-btn"
+                                                  onClick={() => navigate(`/admin/trading/worker/${user.ref_id}/users`, { 
+                                                    state: { 
+                                                      fromTab: activeTab,
+                                                      searchQuery: String(user.chat_id || '')
+                                                    } 
+                                                  })}
+                                                  title="Переглянути клоузера та знайти цього користувача"
+                                                  style={{
+                                                    cursor: 'pointer',
+                                                    background: 'var(--card-background, #1a1a1a)',
+                                                    border: '1px solid var(--border-color, #333)',
+                                                    borderRadius: '4px',
+                                                    padding: '6px 12px',
+                                                    color: 'var(--text-color, #fff)',
+                                                    transition: 'all 0.2s'
+                                                  }}
+                                                  onMouseEnter={(e) => {
+                                                    e.currentTarget.style.backgroundColor = 'var(--border-color, #333)'
+                                                  }}
+                                                  onMouseLeave={(e) => {
+                                                    e.currentTarget.style.backgroundColor = 'var(--card-background, #1a1a1a)'
+                                                  }}
+                                                >
+                                                  Chat ID: {user.ref_id}
+                                                </button>
+                                              </div>
+                                            </div>
+                                            {(user as any).closerComment && (
+                                              <div className="admin-trading-worker-card-section">
+                                                <span className="admin-trading-worker-card-label">Коментар клоузера</span>
+                                                <span className="admin-trading-worker-card-value">{(user as any).closerComment || '—'}</span>
+                                              </div>
+                                            )}
+                                          </>
+                                        )}
+                                      </div>
+                                    )
+                                  })}
+                                </div>
+                              </>
+                            )
+                          })()}
+                        </>
+                      )}
                     </>
                   )}
                 </>

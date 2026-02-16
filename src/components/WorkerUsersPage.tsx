@@ -78,6 +78,8 @@ const WorkerUsersPage = () => {
   const navigate = useNavigate()
   const location = useLocation()
   const { chatId } = useParams<{ chatId: string }>()
+  const fromTab = (location.state as { fromTab?: string; searchQuery?: string } | null)?.fromTab
+  const initialSearchQuery = (location.state as { fromTab?: string; searchQuery?: string } | null)?.searchQuery || ''
   const [initialized, setInitialized] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -96,7 +98,7 @@ const WorkerUsersPage = () => {
   const [closingTradeId, setClosingTradeId] = useState<number | null>(null)
   const [updatingAutoWin, setUpdatingAutoWin] = useState<number | null>(null)
   const [sendingVerification, setSendingVerification] = useState<number | null>(null)
-  const [searchQuery, setSearchQuery] = useState<string>('')
+  const [searchQuery, setSearchQuery] = useState<string>(initialSearchQuery)
   const [confirmSendTPModalOpen, setConfirmSendTPModalOpen] = useState(false)
   const [pendingTPUser, setPendingTPUser] = useState<{ userId: number; chatId: string | number } | null>(null)
   const [editingStats, setEditingStats] = useState<{ userId: number } | null>(null)
@@ -105,7 +107,6 @@ const WorkerUsersPage = () => {
   const [updatingManualCorrection, setUpdatingManualCorrection] = useState<number | null>(null)
   const [blockingUserId, setBlockingUserId] = useState<number | null>(null)
   const [blockingLoading, setBlockingLoading] = useState(false)
-  const fromTab = (location.state as { fromTab?: string } | null)?.fromTab
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -900,6 +901,13 @@ const WorkerUsersPage = () => {
     fetchWorkerUsers()
   }, [initialized, chatId])
 
+  // Встановлюємо пошуковий запит при завантаженні сторінки, якщо він переданий через state
+  useEffect(() => {
+    if (initialSearchQuery) {
+      setSearchQuery(initialSearchQuery)
+    }
+  }, [initialSearchQuery])
+
   if (!initialized) {
     return null
   }
@@ -1007,7 +1015,11 @@ const WorkerUsersPage = () => {
                       {user.chat_id && (
                         <button
                           className="worker-users-block-btn"
-                          onClick={() => handleBlockUser(user.id, user.chat_id, user.blocked ?? false)}
+                          onClick={() => {
+                            if (user.chat_id) {
+                              handleBlockUser(user.id, user.chat_id, user.blocked ?? false)
+                            }
+                          }}
                           disabled={blockingUserId === user.id && blockingLoading}
                           title={(user.blocked ?? false) ? 'Разблокировать пользователя' : 'Заблокировать пользователя'}
                           style={{
