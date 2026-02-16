@@ -36,6 +36,7 @@ interface WorkerUser {
   loss_trades?: number | null
   trade_volume?: number | string | null
   manual_correction?: boolean
+  blocked?: boolean
   trades?: Trade[]
   withdraws?: Withdraw[]
   deposits?: Deposit[]
@@ -102,6 +103,8 @@ const WorkerUsersPage = () => {
   const [statsValues, setStatsValues] = useState<{ allTrades: string; winTrades: string; lossTrades: string; tradeVolume: string }>({ allTrades: '', winTrades: '', lossTrades: '', tradeVolume: '' })
   const [savingStats, setSavingStats] = useState<number | null>(null)
   const [updatingManualCorrection, setUpdatingManualCorrection] = useState<number | null>(null)
+  const [blockingUserId, setBlockingUserId] = useState<number | null>(null)
+  const [blockingLoading, setBlockingLoading] = useState(false)
   const fromTab = (location.state as { fromTab?: string } | null)?.fromTab
 
   useEffect(() => {
@@ -146,7 +149,7 @@ const WorkerUsersPage = () => {
       // Отримуємо користувачів воркера
       const { data, error: fetchError } = await supabase
         .from('users')
-        .select('id, created_at, chat_id, isAdmin, username, first_name, ref_id, balance, auto_win, is_trading_enable, spam, usdt_amount, rub_amount, verification_on, verification_needed, is_message_sending, comment, panel_disabled, worker_comment, all_trades, win_trades, loss_trades, trade_volume, manual_correction')
+        .select('id, created_at, chat_id, isAdmin, username, first_name, ref_id, balance, auto_win, is_trading_enable, spam, usdt_amount, rub_amount, verification_on, verification_needed, is_message_sending, comment, panel_disabled, worker_comment, all_trades, win_trades, loss_trades, trade_volume, manual_correction, blocked')
         .eq('ref_id', chatId)
         .order('created_at', { ascending: false, nullsFirst: false })
 
@@ -852,6 +855,46 @@ const WorkerUsersPage = () => {
     }
   }
 
+  const handleBlockUser = async (userId: number, chatId: string | number, currentBlockedStatus: boolean) => {
+    setBlockingUserId(userId)
+    setBlockingLoading(true)
+    setError(null)
+    setSuccessMessage(null)
+
+    try {
+      const { error } = await supabase
+        .from('users')
+        .update({ blocked: !currentBlockedStatus })
+        .eq('chat_id', chatId)
+
+      if (error) throw error
+
+      // Оновлюємо локальний стан
+      setUsers((prev) =>
+        prev.map((u) =>
+          u.id === userId
+            ? {
+                ...u,
+                blocked: !currentBlockedStatus
+              }
+            : u
+        )
+      )
+
+      setSuccessMessage(`Користувач ${!currentBlockedStatus ? 'заблокований' : 'розблокований'}!`)
+      setTimeout(() => {
+        setSuccessMessage(null)
+      }, 3000)
+    } catch (err: any) {
+      console.error('Помилка блокування користувача', err)
+      setError(err.message || 'Не вдалося заблокувати/розблокувати користувача.')
+      setSuccessMessage(null)
+    } finally {
+      setBlockingLoading(false)
+      setBlockingUserId(null)
+    }
+  }
+
   useEffect(() => {
     if (!initialized || !chatId) return
     fetchWorkerUsers()
@@ -924,7 +967,7 @@ const WorkerUsersPage = () => {
                   return username.includes(query) || firstName.includes(query) || chatId.includes(query)
                 })
                 .map((user) => (
-                <div key={user.id} className="worker-users-card-item">
+                <div key={user.id} className="worker-users-card-item" style={(user.blocked ?? false) ? { opacity: 0.6 } : {}}>
                   <div className="worker-users-card-header">
                     <div className="worker-users-card-header-info">
                       <h3 className="worker-users-card-user-name">
@@ -951,6 +994,37 @@ const WorkerUsersPage = () => {
                   <div className="worker-users-card-section">
                     <span className="worker-users-card-label">Chat ID</span>
                     <span className="worker-users-card-value">{user.chat_id || '—'}</span>
+                  </div>
+                  <div className="worker-users-card-section">
+                    <span className="worker-users-card-label">Статус</span>
+                    <div className="worker-users-value-wrapper">
+                      <span className="worker-users-card-value" style={{ 
+                        color: (user.blocked ?? false) ? '#ff4444' : '#4CAF50',
+                        fontWeight: '600'
+                      }}>
+                        {(user.blocked ?? false) ? 'Заблокирован' : 'Активен'}
+                      </span>
+                      {user.chat_id && (
+                        <button
+                          className="worker-users-block-btn"
+                          onClick={() => handleBlockUser(user.id, user.chat_id, user.blocked ?? false)}
+                          disabled={blockingUserId === user.id && blockingLoading}
+                          title={(user.blocked ?? false) ? 'Разблокировать пользователя' : 'Заблокировать пользователя'}
+                          style={{
+                            backgroundColor: (user.blocked ?? false) ? '#4CAF50' : '#ff4444',
+                            color: '#fff',
+                            border: 'none',
+                            padding: '4px 8px',
+                            borderRadius: '4px',
+                            cursor: 'pointer',
+                            fontSize: '12px',
+                            marginLeft: '8px'
+                          }}
+                        >
+                          {blockingUserId === user.id && blockingLoading ? '...' : ((user.blocked ?? false) ? 'Разблокировать' : 'Заблокировать')}
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <div className="worker-users-card-section">
                     <span className="worker-users-card-label">USDT</span>
