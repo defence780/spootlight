@@ -80,6 +80,146 @@
   animation: slideIn 0.3s ease-out;
 }
 
+/* Список улюблених на сторінці користувачів воркера */
+.worker-users-favorites {
+  background: rgba(234, 179, 8, 0.08);
+  border: 1px solid rgba(234, 179, 8, 0.3);
+  border-radius: 14px;
+  padding: 1rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.worker-users-favorites-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: #f1f3ff;
+}
+.worker-users-favorites-refresh {
+  margin-left: auto;
+  padding: 0.35rem;
+  border: none;
+  background: transparent;
+  color: #888;
+  cursor: pointer;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.worker-users-favorites-refresh:hover {
+  background: rgba(102, 126, 234, 0.2);
+  color: #c3c8ff;
+}
+.worker-users-favorites-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.worker-users-favorites-chip {
+  padding: 0.4rem 0.75rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+  border-radius: 999px;
+  border: 1px solid rgba(102, 126, 234, 0.25);
+  background: rgba(12, 12, 18, 0.6);
+  color: #e3e6ff;
+  text-align: left;
+}
+.worker-users-favorites-chip:hover:not(:disabled) {
+  background: rgba(102, 126, 234, 0.2);
+}
+.worker-users-favorites-chip.active {
+  background: rgba(234, 179, 8, 0.25);
+  color: #fef08a;
+  border-color: rgba(234, 179, 8, 0.4);
+}
+.worker-users-favorites-chip:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.worker-users-favorites-chip-wrapper {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(12, 12, 18, 0.6);
+  border: 1px solid rgba(102, 126, 234, 0.25);
+}
+.worker-users-favorites-chip-wrapper .worker-users-favorites-chip {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+.worker-users-favorites-chip-wrapper .worker-users-favorites-chip.active {
+  background: rgba(234, 179, 8, 0.25);
+}
+.worker-users-favorites-remove {
+  padding: 0.35rem 6px;
+  border: none;
+  background: transparent;
+  color: #888;
+  cursor: pointer;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.worker-users-favorites-remove:hover {
+  background: rgba(239, 68, 68, 0.2);
+  color: #fca5a5;
+}
+.worker-users-favorites-expanded {
+  margin-top: 0.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(234, 179, 8, 0.2);
+}
+.worker-users-favorites-expanded-actions {
+  display: flex;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+.worker-users-favorites-close {
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  border: 1px solid rgba(102, 126, 234, 0.35);
+  background: rgba(102, 126, 234, 0.2);
+  color: #e3e6ff;
+  cursor: pointer;
+  font-size: 0.9rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.worker-users-favorites-close:hover {
+  background: rgba(102, 126, 234, 0.3);
+}
+.worker-users-favorites-open-full {
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  border: 1px solid rgba(76, 175, 80, 0.4);
+  background: rgba(76, 175, 80, 0.2);
+  color: #a5d6a7;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.worker-users-favorites-open-full:hover {
+  background: rgba(76, 175, 80, 0.3);
+}
+.worker-users-favorites-user-card {
+  max-width: 100%;
+}
+.worker-users-favorites-user-card .worker-users-card-section,
+.worker-users-favorites-user-card .worker-users-subsection {
+  margin-bottom: 0.75rem;
+}
+
 @keyframes slideIn {
   from {
     opacity: 0;
@@ -1291,5 +1431,15 @@
 .worker-users-pagination-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+/* Пагінація зверху: відступ знизу та межа знизу */
+.worker-users-pagination--top {
+  margin-top: 0;
+  margin-bottom: 1.5rem;
+  padding-top: 0;
+  padding-bottom: 1.25rem;
+  border-top: none;
+  border-bottom: 1px solid rgba(102, 126, 234, 0.25);
 }
 

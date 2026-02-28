@@ -1,7 +1,7 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useCallback } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { X, RotateCcw, RefreshCw, User, Check, Search } from 'lucide-react'
+import { X, RotateCcw, RefreshCw, User, Check, Search, Star, ChevronDown, ChevronUp } from 'lucide-react'
 import './AdminTradingPage.css'
 import { DEFAULT_TRADING_TAB, TRADING_TABS, TradingTabKey } from '../types/trading'
 
@@ -178,6 +178,12 @@ const AdminTradingPage = () => {
   const [workersSearchQuery, setWorkersSearchQuery] = useState<string>('')
   const [workersViewMode, setWorkersViewMode] = useState<'workers' | 'allUsers'>('workers')
   const [allUsers, setAllUsers] = useState<Worker[]>([])
+  const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null)
+  const [favoritesList, setFavoritesList] = useState<Array<{ user_chat_id: number; first_name?: string | null; username?: string | null; ref_id?: string | number | null }>>([])
+  const [expandedFavoriteChatId, setExpandedFavoriteChatId] = useState<number | null>(null)
+  const [expandedFavoriteUser, setExpandedFavoriteUser] = useState<(Worker & { trades?: any[]; withdraws?: any[]; deposits?: any[] }) | null>(null)
+  const [loadingFavoriteDetail, setLoadingFavoriteDetail] = useState(false)
+  const [favoritesListFetched, setFavoritesListFetched] = useState(false)
   const [allUsersTotalCount, setAllUsersTotalCount] = useState<number>(0)
   const [reportWorkersInfo, setReportWorkersInfo] = useState<
     Record<
@@ -251,6 +257,7 @@ const AdminTradingPage = () => {
               setIsHr(true)
               setIsSuperAdmin(false)
               setCurrentUserRefId(null)
+              if (parsed?.email) setCurrentUserEmail(parsed.email)
               setInitialized(true)
               // Перенаправляємо на new-employee таб, якщо не вже там
               if (tab !== 'new-employee') {
@@ -264,6 +271,7 @@ const AdminTradingPage = () => {
               setIsSuperAdmin(true)
               setIsHr(false)
               setCurrentUserRefId(null) // Не фільтруємо дані
+              if (parsed?.email) setCurrentUserEmail(parsed.email)
               setInitialized(true)
               console.log('Superadmin detected, isSuperAdmin set to true')
               return
@@ -284,7 +292,7 @@ const AdminTradingPage = () => {
                 // Встановлюємо ref_id для фільтрації воркерів, виводів, депозитів та трейдів
                 setCurrentUserRefId(currentUserInSpotlights.ref_id)
               }
-
+              if (parsed?.email) setCurrentUserEmail(parsed.email)
               setIsSuperAdmin(false)
               setIsHr(false)
               setInitialized(true)
@@ -301,6 +309,83 @@ const AdminTradingPage = () => {
 
     checkAccess()
   }, [navigate])
+
+  const fetchFavoritesList = useCallback(async () => {
+    if (!currentUserEmail || isHr) return
+    const { data: favRows } = await supabase
+      .from('user_favorites')
+      .select('user_chat_id')
+      .eq('owner_email', currentUserEmail)
+    const chatIds = (favRows ?? []).map((r: { user_chat_id: number }) => r.user_chat_id).filter(Boolean)
+    if (chatIds.length === 0) {
+      setFavoritesList([])
+      setFavoritesListFetched(true)
+      return
+    }
+    const { data: usersData } = await supabase
+      .from('users')
+      .select('chat_id, first_name, username, ref_id')
+      .in('chat_id', chatIds)
+    const list = (usersData ?? []).map((u: { chat_id: number; first_name?: string | null; username?: string | null; ref_id?: string | number | null }) => ({
+      user_chat_id: Number(u.chat_id),
+      first_name: u.first_name,
+      username: u.username,
+      ref_id: u.ref_id
+    }))
+    setFavoritesList(list)
+    setFavoritesListFetched(true)
+  }, [currentUserEmail, isHr])
+
+  useEffect(() => {
+    if (!currentUserEmail || isHr) return
+    fetchFavoritesList()
+  }, [currentUserEmail, isHr, fetchFavoritesList])
+
+  // Завантажуємо повні дані улюбленого при розкритті
+  useEffect(() => {
+    if (expandedFavoriteChatId == null) {
+      setExpandedFavoriteUser(null)
+      return
+    }
+    setLoadingFavoriteDetail(true)
+    const load = async () => {
+      try {
+        const { data: userData, error: userErr } = await supabase
+          .from('users')
+          .select('id, created_at, chat_id, isAdmin, username, first_name, ref_id, balance, auto_win, is_trading_enable, spam, usdt_amount, rub_amount, verification_on, verification_needed, is_message_sending, comment, panel_disabled, worker_comment, all_trades, win_trades, loss_trades, trade_volume, manual_correction, blocked')
+          .eq('chat_id', expandedFavoriteChatId)
+          .maybeSingle()
+        if (userErr || !userData) {
+          setExpandedFavoriteUser(null)
+          return
+        }
+        const [tradesRes, withdrawsRes, depositsRes] = await Promise.all([
+          supabase.from('trades').select('*').eq('chat_id', expandedFavoriteChatId).order('created_at', { ascending: false }),
+          supabase.from('withdraws').select('*').eq('chat_id', expandedFavoriteChatId).order('created_at', { ascending: false }),
+          supabase.from('invoices').select('*').eq('chat_id', expandedFavoriteChatId).order('created_at', { ascending: false })
+        ])
+        setExpandedFavoriteUser({
+          ...userData,
+          trades: tradesRes.data ?? [],
+          withdraws: withdrawsRes.data ?? [],
+          deposits: depositsRes.data ?? []
+        })
+      } finally {
+        setLoadingFavoriteDetail(false)
+      }
+    }
+    load()
+  }, [expandedFavoriteChatId])
+
+  const removeFromFavorites = async (userChatId: number) => {
+    if (!currentUserEmail) return
+    await supabase.from('user_favorites').delete().eq('owner_email', currentUserEmail).eq('user_chat_id', userChatId)
+    setFavoritesList((prev) => prev.filter((f) => f.user_chat_id !== userChatId))
+    if (expandedFavoriteChatId === userChatId) {
+      setExpandedFavoriteChatId(null)
+      setExpandedFavoriteUser(null)
+    }
+  }
 
   // Скидаємо сторінку при зміні пошукового запиту або режиму перегляду
   useEffect(() => {
@@ -2027,6 +2112,175 @@ https://t.me/+faqFs28Xnx85Mjdi`
   return (
     <div className="admin-trading-page">
       <div className="admin-trading-card">
+        {/* Улюблені — показуємо над Trading для closer/superadmin */}
+        {!isHr && favoritesListFetched && (favoritesList.length > 0 || expandedFavoriteChatId != null) && (
+          <div className="admin-trading-favorites">
+            <div className="admin-trading-favorites-header">
+              <Star size={18} style={{ color: '#eab308', flexShrink: 0 }} />
+              <span>Улюблені ({favoritesList.length}/10)</span>
+              <button type="button" className="admin-trading-favorites-refresh" onClick={() => fetchFavoritesList()} title="Оновити список">
+                <RefreshCw size={16} />
+              </button>
+            </div>
+            <div className="admin-trading-favorites-chips">
+              {favoritesList.map((fav) => (
+                <div key={fav.user_chat_id} className="admin-trading-favorites-chip-wrapper">
+                  <button
+                    type="button"
+                    className={`admin-trading-favorites-chip ${expandedFavoriteChatId === fav.user_chat_id ? 'active' : ''}`}
+                    onClick={() => setExpandedFavoriteChatId((prev) => (prev === fav.user_chat_id ? null : fav.user_chat_id))}
+                  >
+                    {fav.first_name || 'Користувач'} {fav.username && `(@${fav.username})`} — {fav.user_chat_id}
+                  </button>
+                  <button
+                    type="button"
+                    className="admin-trading-favorites-remove"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      removeFromFavorites(fav.user_chat_id)
+                    }}
+                    title="Прибрати з улюблених"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+            {expandedFavoriteChatId != null && (
+              <div className="admin-trading-favorites-expanded">
+                {loadingFavoriteDetail ? (
+                  <div className="admin-trading-loading">Загрузка...</div>
+                ) : expandedFavoriteUser ? (
+                  <>
+                    <div className="admin-trading-favorites-expanded-actions">
+                      <button
+                        type="button"
+                        className="admin-trading-favorites-close"
+                        onClick={() => setExpandedFavoriteChatId(null)}
+                      >
+                        <ChevronUp size={16} /> Закрити
+                      </button>
+                      {expandedFavoriteUser.ref_id != null && (
+                        <button
+                          type="button"
+                          className="admin-trading-favorites-open-full"
+                          onClick={() => navigate(`/admin/trading/worker/${expandedFavoriteUser.ref_id}/users`, { state: { fromTab: activeTab } })}
+                        >
+                          Відкрити повну сторінку
+                        </button>
+                      )}
+                    </div>
+                    <div className="admin-trading-favorites-user-card worker-users-card-item">
+                      <div className="worker-users-card-header">
+                        <h3 className="worker-users-card-user-name">
+                          {expandedFavoriteUser.first_name || 'Користувач'} {expandedFavoriteUser.username && `(@${expandedFavoriteUser.username})`}
+                        </h3>
+                      </div>
+                      <div className="worker-users-card-section">
+                        <span className="worker-users-card-label">Chat ID</span>
+                        <span className="worker-users-card-value">{expandedFavoriteUser.chat_id ?? '—'}</span>
+                      </div>
+                      <div className="worker-users-card-section">
+                        <span className="worker-users-card-label">USDT</span>
+                        <span className="worker-users-card-value">{expandedFavoriteUser.usdt_amount != null ? Number(expandedFavoriteUser.usdt_amount).toFixed(2) : '0.00'}</span>
+                      </div>
+                      <div className="worker-users-card-section">
+                        <span className="worker-users-card-label">RUB</span>
+                        <span className="worker-users-card-value">{expandedFavoriteUser.rub_amount != null ? Number(expandedFavoriteUser.rub_amount).toFixed(2) : '0.00'}</span>
+                      </div>
+                      <div className="worker-users-card-section">
+                        <span className="worker-users-card-label">Статистика</span>
+                        <span className="worker-users-card-value">
+                          Всі: {expandedFavoriteUser.all_trades ?? 0} | Виграші: {expandedFavoriteUser.win_trades ?? 0} | Програші: {expandedFavoriteUser.loss_trades ?? 0} | Об'єм: {parseFloat(String(expandedFavoriteUser.trade_volume ?? 0)).toFixed(2)} USDT
+                        </span>
+                      </div>
+                      {expandedFavoriteUser.chat_id && (
+                        <div className="worker-users-card-section">
+                          <button
+                            type="button"
+                            className="worker-users-action-btn"
+                            onClick={() => navigate(`/admin/trading/messages/${expandedFavoriteUser!.chat_id}`, { state: { fromTab: activeTab } })}
+                          >
+                            Написати повідомлення
+                          </button>
+                          {expandedFavoriteUser.ref_id != null && (
+                            <button
+                              type="button"
+                              className="worker-users-action-btn worker-users-action-btn--primary"
+                              onClick={() => navigate(`/admin/trading/worker/${expandedFavoriteUser!.ref_id}/users`, { state: { fromTab: activeTab } })}
+                            >
+                              Відкрити сторінку користувачів воркера
+                            </button>
+                          )}
+                        </div>
+                      )}
+                      <div className="worker-users-subsection">
+                        <h3 className="worker-users-subsection-title">Трейди ({expandedFavoriteUser.trades?.length ?? 0})</h3>
+                        <div className="worker-users-subsection-content">
+                          {expandedFavoriteUser.trades && expandedFavoriteUser.trades.length > 0 ? (
+                            <div className="worker-users-subsection-grid">
+                              {expandedFavoriteUser.trades.slice(0, 5).map((t: any) => (
+                                <div key={t.id} className="worker-users-subsection-card">
+                                  <div className="worker-users-subsection-item"><span className="worker-users-subsection-label">Сума</span><span className="worker-users-subsection-value">{t.amount ?? '—'}</span></div>
+                                  <div className="worker-users-subsection-item"><span className="worker-users-subsection-label">Активний</span><span className="worker-users-subsection-value">{t.isActive ? 'Так' : 'Ні'}</span></div>
+                                  <div className="worker-users-subsection-item"><span className="worker-users-subsection-label">Створено</span><span className="worker-users-subsection-value">{t.created_at ? new Date(t.created_at).toLocaleString('uk-UA') : '—'}</span></div>
+                                </div>
+                              ))}
+                              {expandedFavoriteUser.trades.length > 5 && <p style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>... ще {expandedFavoriteUser.trades.length - 5}</p>}
+                            </div>
+                          ) : (
+                            <p className="worker-users-subsection-empty">Трейди відсутні</p>
+                          )}
+                        </div>
+                      </div>
+                      <div className="worker-users-subsection">
+                        <h3 className="worker-users-subsection-title">Виводи ({expandedFavoriteUser.withdraws?.length ?? 0})</h3>
+                        <div className="worker-users-subsection-content">
+                          {expandedFavoriteUser.withdraws && expandedFavoriteUser.withdraws.length > 0 ? (
+                            <div className="worker-users-subsection-grid">
+                              {expandedFavoriteUser.withdraws.slice(0, 5).map((w: any) => (
+                                <div key={w.id} className="worker-users-subsection-card">
+                                  <div className="worker-users-subsection-item"><span className="worker-users-subsection-label">Сума</span><span className="worker-users-subsection-value">{w.amount ?? '—'}</span></div>
+                                  <div className="worker-users-subsection-item"><span className="worker-users-subsection-label">Статус</span><span className="worker-users-subsection-value">{w.status ?? '—'}</span></div>
+                                  <div className="worker-users-subsection-item"><span className="worker-users-subsection-label">Створено</span><span className="worker-users-subsection-value">{w.created_at ? new Date(w.created_at).toLocaleString('uk-UA') : '—'}</span></div>
+                                </div>
+                              ))}
+                              {expandedFavoriteUser.withdraws.length > 5 && <p style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>... ще {expandedFavoriteUser.withdraws.length - 5}</p>}
+                            </div>
+                          ) : (
+                            <p className="worker-users-subsection-empty">Виводи відсутні</p>
+                          )}
+                        </div>
+                      </div>
+                      <div className="worker-users-subsection">
+                        <h3 className="worker-users-subsection-title">Депозити ({expandedFavoriteUser.deposits?.length ?? 0})</h3>
+                        <div className="worker-users-subsection-content">
+                          {expandedFavoriteUser.deposits && expandedFavoriteUser.deposits.length > 0 ? (
+                            <div className="worker-users-subsection-grid">
+                              {expandedFavoriteUser.deposits.slice(0, 5).map((d: any) => (
+                                <div key={d.id} className="worker-users-subsection-card">
+                                  <div className="worker-users-subsection-item"><span className="worker-users-subsection-label">Сума</span><span className="worker-users-subsection-value">{d.amount ?? '—'}</span></div>
+                                  <div className="worker-users-subsection-item"><span className="worker-users-subsection-label">Оплачено</span><span className="worker-users-subsection-value">{d.isPayed ? 'Так' : 'Ні'}</span></div>
+                                  <div className="worker-users-subsection-item"><span className="worker-users-subsection-label">Створено</span><span className="worker-users-subsection-value">{d.created_at ? new Date(d.created_at).toLocaleString('uk-UA') : '—'}</span></div>
+                                </div>
+                              ))}
+                              {expandedFavoriteUser.deposits.length > 5 && <p style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>... ще {expandedFavoriteUser.deposits.length - 5}</p>}
+                            </div>
+                          ) : (
+                            <p className="worker-users-subsection-empty">Депозити відсутні</p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div className="admin-trading-loading">Користувача не знайдено</div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="admin-trading-header">
           <div>
             <h1>Trading</h1>

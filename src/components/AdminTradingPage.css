@@ -70,6 +70,132 @@
   font-size: 0.95rem;
 }
 
+/* Улюблені (над Trading) */
+.admin-trading-favorites {
+  background: rgba(234, 179, 8, 0.08);
+  border: 1px solid rgba(234, 179, 8, 0.3);
+  border-radius: 14px;
+  padding: 1rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.admin-trading-favorites-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: #f1f3ff;
+}
+.admin-trading-favorites-refresh {
+  margin-left: auto;
+  padding: 0.35rem;
+  border: none;
+  background: transparent;
+  color: #888;
+  cursor: pointer;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.admin-trading-favorites-refresh:hover {
+  background: rgba(102, 126, 234, 0.2);
+  color: #c3c8ff;
+}
+.admin-trading-favorites-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.admin-trading-favorites-chip-wrapper {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(12, 12, 18, 0.6);
+  border: 1px solid rgba(102, 126, 234, 0.25);
+}
+.admin-trading-favorites-chip {
+  padding: 0.4rem 0.75rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+  border: none;
+  background: transparent;
+  color: #e3e6ff;
+  text-align: left;
+}
+.admin-trading-favorites-chip:hover {
+  background: rgba(102, 126, 234, 0.2);
+}
+.admin-trading-favorites-chip.active {
+  background: rgba(234, 179, 8, 0.25);
+  color: #fef08a;
+}
+.admin-trading-favorites-remove {
+  padding: 0.35rem 6px;
+  border: none;
+  background: transparent;
+  color: #888;
+  cursor: pointer;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.admin-trading-favorites-remove:hover {
+  background: rgba(239, 68, 68, 0.2);
+  color: #fca5a5;
+}
+.admin-trading-favorites-expanded {
+  margin-top: 0.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(234, 179, 8, 0.2);
+}
+.admin-trading-favorites-expanded-actions {
+  display: flex;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+.admin-trading-favorites-close {
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  border: 1px solid rgba(102, 126, 234, 0.35);
+  background: rgba(102, 126, 234, 0.2);
+  color: #e3e6ff;
+  cursor: pointer;
+  font-size: 0.9rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.admin-trading-favorites-close:hover {
+  background: rgba(102, 126, 234, 0.3);
+}
+.admin-trading-favorites-open-full {
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  border: 1px solid rgba(76, 175, 80, 0.4);
+  background: rgba(76, 175, 80, 0.2);
+  color: #a5d6a7;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.admin-trading-favorites-open-full:hover {
+  background: rgba(76, 175, 80, 0.3);
+}
+.admin-trading-favorites-user-card {
+  max-width: 100%;
+}
+.admin-trading-favorites-user-card .worker-users-card-section,
+.admin-trading-favorites-user-card .worker-users-subsection {
+  margin-bottom: 0.75rem;
+}
+
 .admin-trading-tabs {
   display: inline-flex;
   background: rgba(12, 12, 18, 0.8);

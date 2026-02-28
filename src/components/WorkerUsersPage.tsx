@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { Pencil, Check, X, RefreshCw, RotateCcw, DollarSign, Search, Circle, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Pencil, Check, X, RefreshCw, RotateCcw, DollarSign, Search, Circle, ChevronLeft, ChevronRight, Star, ChevronUp } from 'lucide-react'
+import { useCallback } from 'react'
 import './WorkerUsersPage.css'
 
 const STORAGE_KEY = 'spotlight_user'
@@ -111,6 +112,13 @@ const WorkerUsersPage = () => {
   const [totalCount, setTotalCount] = useState<number>(0)
   const perPage = 10
   const [debouncedSearch, setDebouncedSearch] = useState(initialSearchQuery)
+  const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null)
+  const [favoriteUserChatIds, setFavoriteUserChatIds] = useState<Set<number>>(new Set())
+  const [favoritesList, setFavoritesList] = useState<Array<{ user_chat_id: number; first_name?: string | null; username?: string | null; ref_id?: string | number | null }>>([])
+  const [togglingFavoriteChatId, setTogglingFavoriteChatId] = useState<number | null>(null)
+  const [expandedFavoriteChatId, setExpandedFavoriteChatId] = useState<number | null>(null)
+  const [expandedFavoriteUser, setExpandedFavoriteUser] = useState<(WorkerUser & { trades?: any[]; withdraws?: any[]; deposits?: any[] }) | null>(null)
+  const [loadingFavoriteDetail, setLoadingFavoriteDetail] = useState(false)
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -121,6 +129,7 @@ const WorkerUsersPage = () => {
         const parsed: StoredUser | null = JSON.parse(stored)
         if (parsed?.type === 'admin' || parsed?.type === 'superadmin') {
           setInitialized(true)
+          if (parsed?.email) setCurrentUserEmail(parsed.email)
           return
         }
       }
@@ -130,6 +139,139 @@ const WorkerUsersPage = () => {
 
     navigate('/', { replace: true })
   }, [navigate])
+
+  const fetchFavoritesList = useCallback(async () => {
+    if (!currentUserEmail) return
+    const { data: favRows } = await supabase
+      .from('user_favorites')
+      .select('user_chat_id')
+      .eq('owner_email', currentUserEmail)
+    const chatIds = (favRows ?? []).map((r: { user_chat_id: number }) => r.user_chat_id).filter(Boolean)
+    const ids = new Set(chatIds.map(Number))
+    setFavoriteUserChatIds(ids)
+    if (chatIds.length === 0) {
+      setFavoritesList([])
+      return
+    }
+    const { data: usersData } = await supabase
+      .from('users')
+      .select('chat_id, first_name, username, ref_id')
+      .in('chat_id', chatIds)
+    const list = (usersData ?? []).map((u: { chat_id: number; first_name?: string | null; username?: string | null; ref_id?: string | number | null }) => ({
+      user_chat_id: Number(u.chat_id),
+      first_name: u.first_name,
+      username: u.username,
+      ref_id: u.ref_id
+    }))
+    setFavoritesList(list)
+  }, [currentUserEmail])
+
+  useEffect(() => {
+    if (!currentUserEmail) return
+    fetchFavoritesList()
+  }, [currentUserEmail, fetchFavoritesList])
+
+  const FAVORITES_MAX = 10
+
+  const toggleFavorite = async (userChatId: string | number) => {
+    if (!currentUserEmail) return
+    const cid = Number(userChatId)
+    if (Number.isNaN(cid)) return
+    const isFav = favoriteUserChatIds.has(cid)
+    if (!isFav && favoritesList.length >= FAVORITES_MAX) {
+      setError(`У клоузера не може бути більше ${FAVORITES_MAX} улюблених. Приберіть когось із списку.`)
+      return
+    }
+    setTogglingFavoriteChatId(cid)
+    setError(null)
+    try {
+      if (isFav) {
+        await supabase.from('user_favorites').delete().eq('owner_email', currentUserEmail).eq('user_chat_id', cid)
+        setFavoriteUserChatIds((prev) => {
+          const next = new Set(prev)
+          next.delete(cid)
+          return next
+        })
+        setFavoritesList((prev) => prev.filter((f) => f.user_chat_id !== cid))
+      } else {
+        const { error: insertError } = await supabase.from('user_favorites').insert({ owner_email: currentUserEmail, user_chat_id: cid })
+        if (insertError) {
+          setError(insertError.message || `У клоузера не може бути більше ${FAVORITES_MAX} улюблених.`)
+          return
+        }
+        setFavoriteUserChatIds((prev) => new Set([...prev, cid]))
+        await fetchFavoritesList()
+      }
+    } finally {
+      setTogglingFavoriteChatId(null)
+    }
+  }
+
+  const removeFromFavorites = async (userChatId: number) => {
+    if (!currentUserEmail) return
+    await supabase.from('user_favorites').delete().eq('owner_email', currentUserEmail).eq('user_chat_id', userChatId)
+    setFavoritesList((prev) => prev.filter((f) => f.user_chat_id !== userChatId))
+    setFavoriteUserChatIds((prev) => {
+      const next = new Set(prev)
+      next.delete(userChatId)
+      return next
+    })
+    if (expandedFavoriteChatId === userChatId) {
+      setExpandedFavoriteChatId(null)
+      setExpandedFavoriteUser(null)
+    }
+  }
+
+  const refetchExpandedFavoriteUser = useCallback(async () => {
+    if (expandedFavoriteChatId == null) return
+    try {
+      const { data: userData, error: userErr } = await supabase
+        .from('users')
+        .select('id, created_at, chat_id, isAdmin, username, first_name, ref_id, balance, auto_win, is_trading_enable, spam, usdt_amount, rub_amount, verification_on, verification_needed, is_message_sending, comment, panel_disabled, worker_comment, all_trades, win_trades, loss_trades, trade_volume, manual_correction, blocked')
+        .eq('chat_id', expandedFavoriteChatId)
+        .maybeSingle()
+      if (userErr || !userData) {
+        setExpandedFavoriteUser(null)
+        return
+      }
+      const [tradesRes, withdrawsRes, depositsRes] = await Promise.all([
+        supabase.from('trades').select('*').eq('chat_id', expandedFavoriteChatId).order('created_at', { ascending: false }),
+        supabase.from('withdraws').select('*').eq('chat_id', expandedFavoriteChatId).order('created_at', { ascending: false }),
+        supabase.from('invoices').select('*').eq('chat_id', expandedFavoriteChatId).order('created_at', { ascending: false })
+      ])
+      setExpandedFavoriteUser({
+        ...userData,
+        trades: tradesRes.data ?? [],
+        withdraws: withdrawsRes.data ?? [],
+        deposits: depositsRes.data ?? []
+      })
+    } catch {
+      setExpandedFavoriteUser(null)
+    }
+  }, [expandedFavoriteChatId])
+
+  useEffect(() => {
+    if (expandedFavoriteChatId == null) {
+      setExpandedFavoriteUser(null)
+      return
+    }
+    setLoadingFavoriteDetail(true)
+    const load = async () => {
+      try {
+        await refetchExpandedFavoriteUser()
+      } finally {
+        setLoadingFavoriteDetail(false)
+      }
+    }
+    load()
+  }, [expandedFavoriteChatId, refetchExpandedFavoriteUser])
+
+  const getEffectiveUser = useCallback((userId: number): WorkerUser | null => {
+    const fromList = users.find((u) => u.id === userId)
+    if (fromList) return fromList
+    if (expandedFavoriteUser?.id === userId) return expandedFavoriteUser
+    return null
+  }, [users, expandedFavoriteUser])
 
   const fetchWorkerUsers = async (page: number, search: string) => {
     if (!chatId) return
@@ -265,6 +407,7 @@ const WorkerUsersPage = () => {
             : user
         )
       )
+      if (expandedFavoriteUser?.id === userId) await refetchExpandedFavoriteUser()
     } catch (err: any) {
       console.error('Ошибка обновления данных пользователя', err)
       setError(err.message || 'Не удалось обновить данные пользователя.')
@@ -284,7 +427,7 @@ const WorkerUsersPage = () => {
   }
 
   const saveBalance = async (userId: number, field: 'usdt_amount' | 'rub_amount') => {
-    const user = users.find((u) => u.id === userId)
+    const user = getEffectiveUser(userId)
     if (!user || !user.chat_id) return
 
     const numericValue = parseFloat(editValue.replace(',', '.'))
@@ -307,15 +450,9 @@ const WorkerUsersPage = () => {
       if (error) throw error
 
       setUsers((prev) =>
-        prev.map((u) =>
-          u.id === userId
-            ? {
-                ...u,
-                [field]: numericValue
-              }
-            : u
-        )
+        prev.some((u) => u.id === userId) ? prev.map((u) => (u.id === userId ? { ...u, [field]: numericValue } : u)) : prev
       )
+      if (expandedFavoriteUser?.id === userId) await refetchExpandedFavoriteUser()
 
       const fieldName = field === 'usdt_amount' ? 'USDT' : 'RUB'
       setSuccessMessage(`Баланс ${fieldName} успішно змінено!`)
@@ -353,15 +490,9 @@ const WorkerUsersPage = () => {
       }
 
       setUsers((prev) =>
-        prev.map((user) =>
-          user.id === userId
-            ? {
-                ...user,
-                [section]: data || []
-              }
-            : user
-        )
+        prev.some((u) => u.id === userId) ? prev.map((user) => (user.id === userId ? { ...user, [section]: data || [] } : user)) : prev
       )
+      if (expandedFavoriteUser?.id === userId) await refetchExpandedFavoriteUser()
 
       const sectionName = section === 'trades' ? 'Трейди' : section === 'withdraws' ? 'Виводи' : 'Депозити'
       setSuccessMessage(`${sectionName} успішно оновлено!`)
@@ -390,15 +521,9 @@ const WorkerUsersPage = () => {
       if (error) throw error
 
       setUsers((prev) =>
-        prev.map((u) =>
-          u.id === userId
-            ? {
-                ...u,
-                [field]: value
-              }
-            : u
-        )
+        prev.some((u) => u.id === userId) ? prev.map((u) => (u.id === userId ? { ...u, [field]: value } : u)) : prev
       )
+      if (expandedFavoriteUser?.id === userId) await refetchExpandedFavoriteUser()
 
       const fieldNames: Record<string, string> = {
         is_trading_enable: 'Трейдинг дозволено',
@@ -474,21 +599,20 @@ const WorkerUsersPage = () => {
       if (updateUserResult.error) throw updateUserResult.error
       if (updateWithdrawResult.error) throw updateWithdrawResult.error
 
-      // Оновлюємо локальний стан
       setUsers((prev) =>
-        prev.map((user) => {
-          if (user.id === userId) {
-            return {
-              ...user,
-              rub_amount: newRubAmount,
-              withdraws: user.withdraws?.map((w) =>
-                w.id === withdrawId ? { ...w, isDone: true } : w
-              ) || []
-            }
-          }
-          return user
-        })
+        prev.some((u) => u.id === userId)
+          ? prev.map((user) =>
+              user.id === userId
+                ? {
+                    ...user,
+                    rub_amount: newRubAmount,
+                    withdraws: user.withdraws?.map((w) => (w.id === withdrawId ? { ...w, isDone: true } : w)) || []
+                  }
+                : user
+            )
+          : prev
       )
+      if (expandedFavoriteUser?.id === userId) await refetchExpandedFavoriteUser()
 
       setSuccessMessage(`Кошти успішно повернено на баланс користувача!`)
       setTimeout(() => {
@@ -563,21 +687,20 @@ const WorkerUsersPage = () => {
       if (updateUserResult.error) throw updateUserResult.error
       if (updateDepositResult.error) throw updateDepositResult.error
 
-      // Оновлюємо локальний стан
       setUsers((prev) =>
-        prev.map((user) => {
-          if (user.id === userId) {
-            return {
-              ...user,
-              ...updateData,
-              deposits: user.deposits?.map((d) =>
-                d.id === depositId ? { ...d, isPayed: true } : d
-              ) || []
-            }
-          }
-          return user
-        })
+        prev.some((u) => u.id === userId)
+          ? prev.map((user) =>
+              user.id === userId
+                ? {
+                    ...user,
+                    ...updateData,
+                    deposits: user.deposits?.map((d) => (d.id === depositId ? { ...d, isPayed: true } : d)) || []
+                  }
+                : user
+            )
+          : prev
       )
+      if (expandedFavoriteUser?.id === userId) await refetchExpandedFavoriteUser()
 
       const currencyName = isUSDT ? 'USDT' : 'RUB'
       setSuccessMessage(`Кошти успішно зараховано на баланс ${currencyName}!`)
@@ -641,21 +764,20 @@ const WorkerUsersPage = () => {
       if (updateUserResult.error) throw updateUserResult.error
       if (updateTradeResult.error) throw updateTradeResult.error
 
-      // Оновлюємо локальний стан
       setUsers((prev) =>
-        prev.map((user) => {
-          if (user.id === userId) {
-            return {
-              ...user,
-              usdt_amount: newUsdtAmount,
-              trades: user.trades?.map((t) =>
-                t.id === tradeId ? { ...t, isActive: false, isWin: isWin } : t
-              ) || []
-            }
-          }
-          return user
-        })
+        prev.some((u) => u.id === userId)
+          ? prev.map((user) =>
+              user.id === userId
+                ? {
+                    ...user,
+                    usdt_amount: newUsdtAmount,
+                    trades: user.trades?.map((t) => (t.id === tradeId ? { ...t, isActive: false, isWin: isWin } : t)) || []
+                  }
+                : user
+            )
+          : prev
       )
+      if (expandedFavoriteUser?.id === userId) await refetchExpandedFavoriteUser()
 
       if (isWin) {
         setSuccessMessage(`Трейд успішно закрито як виграш! Нараховано ${totalAmount.toFixed(2)} USDT (${tradeAmount.toFixed(2)} + бонус ${bonusAmount.toFixed(2)})`)
@@ -687,14 +809,10 @@ const WorkerUsersPage = () => {
 
       if (error) throw error
 
-      // Оновлюємо локальний стан
-      setUsers((prevUsers) =>
-        prevUsers.map((user) =>
-          user.id === userId
-            ? { ...user, auto_win: newValue }
-            : user
-        )
+      setUsers((prev) =>
+        prev.some((u) => u.id === userId) ? prev.map((user) => (user.id === userId ? { ...user, auto_win: newValue } : user)) : prev
       )
+      if (expandedFavoriteUser?.id === userId) await refetchExpandedFavoriteUser()
 
       const statusText = newValue === true ? 'Перемога' : newValue === false ? 'Програш' : 'Казино'
       setSuccessMessage(`Статус auto_win успішно змінено на "${statusText}"`)
@@ -793,18 +911,21 @@ const WorkerUsersPage = () => {
       if (error) throw error
 
       setUsers((prev) =>
-        prev.map((u) =>
-          u.id === userId
-            ? {
-                ...u,
-                all_trades: allTradesNum,
-                win_trades: winTradesNum,
-                loss_trades: lossTradesNum,
-                trade_volume: tradeVolumeNum
-              }
-            : u
-        )
+        prev.some((u) => u.id === userId)
+          ? prev.map((u) =>
+              u.id === userId
+                ? {
+                    ...u,
+                    all_trades: allTradesNum,
+                    win_trades: winTradesNum,
+                    loss_trades: lossTradesNum,
+                    trade_volume: tradeVolumeNum
+                  }
+                : u
+            )
+          : prev
       )
+      if (expandedFavoriteUser?.id === userId) await refetchExpandedFavoriteUser()
 
       setSuccessMessage('Статистику успішно оновлено!')
       setEditingStats(null)
@@ -836,15 +957,9 @@ const WorkerUsersPage = () => {
       if (error) throw error
 
       setUsers((prev) =>
-        prev.map((u) =>
-          u.id === userId
-            ? {
-                ...u,
-                manual_correction: value
-              }
-            : u
-        )
+        prev.some((u) => u.id === userId) ? prev.map((u) => (u.id === userId ? { ...u, manual_correction: value } : u)) : prev
       )
+      if (expandedFavoriteUser?.id === userId) await refetchExpandedFavoriteUser()
 
       setSuccessMessage(`Ручна корекція ${value ? 'увімкнена' : 'вимкнена'}!`)
       setTimeout(() => {
@@ -873,17 +988,12 @@ const WorkerUsersPage = () => {
 
       if (error) throw error
 
-      // Оновлюємо локальний стан
       setUsers((prev) =>
-        prev.map((u) =>
-          u.id === userId
-            ? {
-                ...u,
-                blocked: !currentBlockedStatus
-              }
-            : u
-        )
+        prev.some((u) => u.id === userId)
+          ? prev.map((u) => (u.id === userId ? { ...u, blocked: !currentBlockedStatus } : u))
+          : prev
       )
+      if (expandedFavoriteUser?.id === userId) await refetchExpandedFavoriteUser()
 
       setSuccessMessage(`Користувач ${!currentBlockedStatus ? 'заблокований' : 'розблокований'}!`)
       setTimeout(() => {
@@ -954,6 +1064,404 @@ const WorkerUsersPage = () => {
         {error && <div className="worker-users-error">{error}</div>}
         {successMessage && <div className="worker-users-success">{successMessage}</div>}
 
+        {currentUserEmail && (favoritesList.length > 0 || expandedFavoriteChatId != null) && (
+          <div className="worker-users-favorites">
+            <div className="worker-users-favorites-header">
+              <Star size={18} style={{ color: '#eab308', flexShrink: 0 }} />
+              <span>Улюблені{favoritesList.length >= FAVORITES_MAX ? ` (${FAVORITES_MAX}/${FAVORITES_MAX})` : ` (${favoritesList.length}/${FAVORITES_MAX})`}</span>
+              <button type="button" className="worker-users-favorites-refresh" onClick={() => fetchFavoritesList()} title="Оновити список">
+                <RefreshCw size={16} />
+              </button>
+            </div>
+            <div className="worker-users-favorites-chips">
+              {favoritesList.map((fav) => (
+                <div key={fav.user_chat_id} className="worker-users-favorites-chip-wrapper">
+                  <button
+                    type="button"
+                    className={`worker-users-favorites-chip ${expandedFavoriteChatId === fav.user_chat_id ? 'active' : ''}`}
+                    onClick={() => setExpandedFavoriteChatId((prev) => (prev === fav.user_chat_id ? null : fav.user_chat_id))}
+                    title={expandedFavoriteChatId === fav.user_chat_id ? 'Згорнути картку' : 'Розкрити картку'}
+                  >
+                    {fav.first_name || 'Користувач'} {fav.username && `(@${fav.username})`} — {fav.user_chat_id}
+                  </button>
+                  <button
+                    type="button"
+                    className="worker-users-favorites-remove"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      removeFromFavorites(fav.user_chat_id)
+                    }}
+                    title="Прибрати з улюблених"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+            {expandedFavoriteChatId != null && (
+              <div className="worker-users-favorites-expanded">
+                {loadingFavoriteDetail ? (
+                  <div className="worker-users-loading">Загрузка...</div>
+                ) : expandedFavoriteUser ? (
+                  <>
+                    <div className="worker-users-favorites-expanded-actions">
+                      <button
+                        type="button"
+                        className="worker-users-favorites-close"
+                        onClick={() => setExpandedFavoriteChatId(null)}
+                      >
+                        <ChevronUp size={16} /> Закрити
+                      </button>
+                      {expandedFavoriteUser.ref_id != null && (
+                        <button
+                          type="button"
+                          className="worker-users-favorites-open-full"
+                          onClick={() => navigate(`/admin/trading/worker/${expandedFavoriteUser!.ref_id}/users`, { state: { fromTab: fromTab || 'workers' } })}
+                        >
+                          Відкрити повну сторінку
+                        </button>
+                      )}
+                    </div>
+                    <div className="worker-users-favorites-user-card">
+                      {(() => {
+                        const user = expandedFavoriteUser
+                        return (
+                          <div className="worker-users-card-item" style={(user.blocked ?? false) ? { opacity: 0.6 } : {}}>
+                            <div className="worker-users-card-header">
+                              <div className="worker-users-card-header-info">
+                                <h3 className="worker-users-card-user-name">
+                                  {user.first_name || 'Користувач'} {user.username && `(@${user.username})`}
+                                </h3>
+                              </div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                {user.chat_id != null && currentUserEmail && (
+                                  <button
+                                    type="button"
+                                    className="worker-users-favorite-btn"
+                                    onClick={() => {
+                                      removeFromFavorites(Number(user.chat_id))
+                                      setExpandedFavoriteChatId(null)
+                                    }}
+                                    title="Прибрати з улюблених"
+                                    style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', color: '#eab308' }}
+                                  >
+                                    <Star size={20} fill="#eab308" />
+                                  </button>
+                                )}
+                                <button
+                                  className="worker-users-refresh-btn"
+                                  onClick={() => user.chat_id && updateUserData(user.id, user.chat_id)}
+                                  disabled={updatingUserId === user.id}
+                                  title="Оновити дані користувача"
+                                >
+                                  {updatingUserId === user.id ? 'Оновлення...' : 'Оновити'}
+                                </button>
+                              </div>
+                            </div>
+                            <div className="worker-users-card-section">
+                              <span className="worker-users-card-label">Ім'я</span>
+                              <span className="worker-users-card-value">{user.first_name || '—'}</span>
+                            </div>
+                            <div className="worker-users-card-section">
+                              <span className="worker-users-card-label">Username</span>
+                              <span className="worker-users-card-value">{user.username ? `@${user.username}` : '—'}</span>
+                            </div>
+                            <div className="worker-users-card-section">
+                              <span className="worker-users-card-label">Chat ID</span>
+                              <span className="worker-users-card-value">{user.chat_id || '—'}</span>
+                            </div>
+                            <div className="worker-users-card-section">
+                              <span className="worker-users-card-label">Статус</span>
+                              <div className="worker-users-value-wrapper">
+                                <span className="worker-users-card-value" style={{ color: (user.blocked ?? false) ? '#ff4444' : '#4CAF50', fontWeight: '600' }}>
+                                  {(user.blocked ?? false) ? 'Заблокирован' : 'Активен'}
+                                </span>
+                                {user.chat_id && (
+                                  <button
+                                    className="worker-users-block-btn"
+                                    onClick={() => handleBlockUser(user.id, user.chat_id, user.blocked ?? false)}
+                                    disabled={blockingUserId === user.id && blockingLoading}
+                                    title={(user.blocked ?? false) ? 'Разблокировать пользователя' : 'Заблокировать пользователя'}
+                                    style={{
+                                      backgroundColor: (user.blocked ?? false) ? '#4CAF50' : '#ff4444',
+                                      color: '#fff',
+                                      border: 'none',
+                                      padding: '4px 8px',
+                                      borderRadius: '4px',
+                                      cursor: 'pointer',
+                                      fontSize: '12px',
+                                      marginLeft: '8px'
+                                    }}
+                                  >
+                                    {blockingUserId === user.id && blockingLoading ? '...' : (user.blocked ?? false ? 'Разблокировать' : 'Заблокировать')}
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                            <div className="worker-users-card-section">
+                              <span className="worker-users-card-label">USDT</span>
+                              {editingField?.userId === user.id && editingField?.field === 'usdt_amount' ? (
+                                <div className="worker-users-edit-wrapper">
+                                  <input type="number" step="0.01" className="worker-users-edit-input" value={editValue} onChange={(e) => setEditValue(e.target.value)} autoFocus />
+                                  <button className="worker-users-edit-btn worker-users-edit-btn--save" onClick={() => saveBalance(user.id, 'usdt_amount')} disabled={savingField?.userId === user.id && savingField?.field === 'usdt_amount'} title="Зберегти"><Check size={16} /></button>
+                                  <button className="worker-users-edit-btn worker-users-edit-btn--cancel" onClick={cancelEditing} disabled={savingField?.userId === user.id && savingField?.field === 'usdt_amount'} title="Відмінити"><X size={16} /></button>
+                                </div>
+                              ) : (
+                                <div className="worker-users-value-wrapper">
+                                  <span className="worker-users-card-value">{user.usdt_amount ? `${Number(user.usdt_amount).toFixed(2)}` : '0.00'}</span>
+                                  <button className="worker-users-edit-icon-btn" onClick={() => startEditing(user.id, 'usdt_amount', user.usdt_amount ?? null)} disabled={savingField?.userId === user.id && savingField?.field === 'usdt_amount'} title="Редагувати USDT"><Pencil size={14} /></button>
+                                </div>
+                              )}
+                            </div>
+                            <div className="worker-users-card-section">
+                              <span className="worker-users-card-label">RUB</span>
+                              {editingField?.userId === user.id && editingField?.field === 'rub_amount' ? (
+                                <div className="worker-users-edit-wrapper">
+                                  <input type="number" step="0.01" className="worker-users-edit-input" value={editValue} onChange={(e) => setEditValue(e.target.value)} autoFocus />
+                                  <button className="worker-users-edit-btn worker-users-edit-btn--save" onClick={() => saveBalance(user.id, 'rub_amount')} disabled={savingField?.userId === user.id && savingField?.field === 'rub_amount'} title="Зберегти"><Check size={16} /></button>
+                                  <button className="worker-users-edit-btn worker-users-edit-btn--cancel" onClick={cancelEditing} disabled={savingField?.userId === user.id && savingField?.field === 'rub_amount'} title="Відмінити"><X size={16} /></button>
+                                </div>
+                              ) : (
+                                <div className="worker-users-value-wrapper">
+                                  <span className="worker-users-card-value">{user.rub_amount ? `${Number(user.rub_amount).toFixed(2)}` : '0.00'}</span>
+                                  <button className="worker-users-edit-icon-btn" onClick={() => startEditing(user.id, 'rub_amount', user.rub_amount ?? null)} disabled={savingField?.userId === user.id && savingField?.field === 'rub_amount'} title="Редагувати RUB"><Pencil size={14} /></button>
+                                </div>
+                              )}
+                            </div>
+                            <div className="worker-users-card-section">
+                              <span className="worker-users-card-label">Трейдинг дозволено</span>
+                              <div className="worker-users-toggle-wrapper">
+                                <span className={`worker-users-badge ${user.is_trading_enable ? 'worker-users-badge--enabled' : 'worker-users-badge--disabled'}`}>{user.is_trading_enable ? 'Так' : 'Ні'}</span>
+                                {user.chat_id && (
+                                  <button className="worker-users-toggle-btn" onClick={() => updateUserField(user.id, user.chat_id, 'is_trading_enable', !user.is_trading_enable)} disabled={updatingField?.userId === user.id && updatingField?.field === 'is_trading_enable'} title={user.is_trading_enable ? 'Вимкнути трейдинг' : 'Увімкнути трейдинг'}>
+                                    {updatingField?.userId === user.id && updatingField?.field === 'is_trading_enable' ? <RefreshCw size={14} className="spinning" /> : <Pencil size={14} />}
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                            <div className="worker-users-card-section">
+                              <span className="worker-users-card-label">Показати верифікацію</span>
+                              <div className="worker-users-toggle-wrapper">
+                                <span className={`worker-users-badge ${user.verification_on ? 'worker-users-badge--enabled' : 'worker-users-badge--disabled'}`}>{user.verification_on ? 'Увімкнено' : 'Вимкнено'}</span>
+                                {user.chat_id && (
+                                  <button className="worker-users-toggle-btn" onClick={() => updateUserField(user.id, user.chat_id, 'verification_on', !user.verification_on)} disabled={updatingField?.userId === user.id && updatingField?.field === 'verification_on'} title={user.verification_on ? 'Вимкнути показ верифікації' : 'Увімкнути показ верифікації'}>
+                                    {updatingField?.userId === user.id && updatingField?.field === 'verification_on' ? <RefreshCw size={14} className="spinning" /> : <Pencil size={14} />}
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                            <div className="worker-users-card-section">
+                              <span className="worker-users-card-label">Потрібна верифікація</span>
+                              <div className="worker-users-toggle-wrapper">
+                                <span className={`worker-users-badge ${user.verification_needed ? 'worker-users-badge--enabled' : 'worker-users-badge--disabled'}`}>{user.verification_needed ? 'Потрібно' : 'Не потрібно'}</span>
+                                {user.chat_id && (
+                                  <button className="worker-users-toggle-btn" onClick={() => updateUserField(user.id, user.chat_id, 'verification_needed', !user.verification_needed)} disabled={updatingField?.userId === user.id && updatingField?.field === 'verification_needed'} title={user.verification_needed ? 'Вимкнути потребу верифікації' : 'Увімкнути потребу верифікації'}>
+                                    {updatingField?.userId === user.id && updatingField?.field === 'verification_needed' ? <RefreshCw size={14} className="spinning" /> : <Pencil size={14} />}
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                            <div className="worker-users-card-section">
+                              <span className="worker-users-card-label">Auto Win</span>
+                              <div className="worker-users-is-win-wrapper">
+                                {(() => {
+                                  const getAutoWinStatus = (autoWin: boolean | null | undefined) => {
+                                    if (autoWin === true) return { icon: <Check size={16} />, text: 'Перемога', color: '#22c55e' }
+                                    if (autoWin === false) return { icon: <X size={16} />, text: 'Програш', color: '#ef4444' }
+                                    return { icon: <Circle size={16} />, text: 'Казино', color: '#eab308' }
+                                  }
+                                  const autoWinStatus = getAutoWinStatus(user.auto_win ?? null)
+                                  return (
+                                    <button className="worker-users-is-win-btn" onClick={() => user.chat_id && updateAutoWin(user.id, user.chat_id, user.auto_win === null ? true : user.auto_win === true ? false : null)} disabled={updatingAutoWin === user.id} style={{ color: autoWinStatus.color }} title={`Змінити статус: ${autoWinStatus.text}`}>
+                                      {updatingAutoWin === user.id ? <RefreshCw size={16} className="spinning" /> : autoWinStatus.icon}
+                                      <span>{autoWinStatus.text}</span>
+                                    </button>
+                                  )
+                                })()}
+                              </div>
+                            </div>
+                            <div className="worker-users-card-section">
+                              <span className="worker-users-card-label">Ручна корекція</span>
+                              <div className="worker-users-toggle-wrapper">
+                                <span className={`worker-users-badge ${user.manual_correction ? 'worker-users-badge--enabled' : 'worker-users-badge--disabled'}`}>{user.manual_correction ? 'Увімкнено' : 'Вимкнено'}</span>
+                                {user.chat_id && (
+                                  <button className="worker-users-toggle-btn" onClick={() => user.chat_id && updateManualCorrection(user.id, user.chat_id, !user.manual_correction)} disabled={updatingManualCorrection === user.id} title={user.manual_correction ? 'Вимкнути ручну корекцію' : 'Увімкнути ручну корекцію'}>
+                                    {updatingManualCorrection === user.id ? <RefreshCw size={14} className="spinning" /> : <Pencil size={14} />}
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                            {editingStats?.userId === user.id ? (
+                              <div className="worker-users-card-section">
+                                <span className="worker-users-card-label">Статистика (редагування)</span>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '8px' }}>
+                                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}><label style={{ fontSize: '12px', minWidth: '80px' }}>Всі трейди:</label><input type="number" step="1" style={{ flex: 1, padding: '4px 8px', fontSize: '12px' }} value={statsValues.allTrades} onChange={(e) => setStatsValues((s) => ({ ...s, allTrades: e.target.value }))} /></div>
+                                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}><label style={{ fontSize: '12px', minWidth: '80px' }}>Виграші:</label><input type="number" step="1" style={{ flex: 1, padding: '4px 8px', fontSize: '12px' }} value={statsValues.winTrades} onChange={(e) => setStatsValues((s) => ({ ...s, winTrades: e.target.value }))} /></div>
+                                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}><label style={{ fontSize: '12px', minWidth: '80px' }}>Програші:</label><input type="number" step="1" style={{ flex: 1, padding: '4px 8px', fontSize: '12px' }} value={statsValues.lossTrades} onChange={(e) => setStatsValues((s) => ({ ...s, lossTrades: e.target.value }))} /></div>
+                                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}><label style={{ fontSize: '12px', minWidth: '80px' }}>Об'єм (USDT):</label><input type="number" step="0.01" style={{ flex: 1, padding: '4px 8px', fontSize: '12px' }} value={statsValues.tradeVolume} onChange={(e) => setStatsValues((s) => ({ ...s, tradeVolume: e.target.value }))} /></div>
+                                  <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+                                    <button className="worker-users-edit-btn worker-users-edit-btn--save" onClick={() => user.chat_id && saveStats(user.id, user.chat_id)} disabled={savingStats === user.id} title="Зберегти"><Check size={14} /></button>
+                                    <button className="worker-users-edit-btn worker-users-edit-btn--cancel" onClick={cancelEditingStats} disabled={savingStats === user.id} title="Відмінити"><X size={14} /></button>
+                                  </div>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="worker-users-card-section">
+                                <span className="worker-users-card-label">Статистика</span>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '4px' }}>
+                                  <div style={{ fontSize: '12px' }}>Всі: {user.all_trades ?? 0} | Виграші: <span style={{ color: '#22c55e' }}>{user.win_trades ?? 0}</span> | Програші: <span style={{ color: '#ef4444' }}>{user.loss_trades ?? 0}</span></div>
+                                  <div style={{ fontSize: '12px' }}>Об'єм: {parseFloat(String(user.trade_volume ?? 0)).toFixed(2)} USDT</div>
+                                  {user.chat_id && (
+                                    <button className="worker-users-edit-icon-btn" onClick={() => startEditingStats(user)} disabled={savingStats === user.id} title="Редагувати статистику" style={{ marginTop: '4px', alignSelf: 'flex-start' }}><Pencil size={14} /></button>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                            <div className="worker-users-card-section">
+                              <span className="worker-users-card-label">Створено</span>
+                              <span className="worker-users-card-value">{user.created_at ? new Date(user.created_at).toLocaleString('uk-UA') : '—'}</span>
+                            </div>
+                            {user.chat_id && (
+                              <div className="worker-users-card-section">
+                                <button className="worker-users-action-btn" onClick={() => navigate(`/admin/trading/messages/${user.chat_id}`, { state: { fromTab: fromTab || 'workers' } })} title="Написати повідомлення" type="button">Написати повідомлення</button>
+                                <button className="worker-users-action-btn worker-users-action-btn--primary" onClick={() => { if (user.chat_id && chatId) { setPendingTPUser({ userId: user.id, chatId: user.chat_id }); setConfirmSendTPModalOpen(true) } }} disabled={sendingVerification === user.id} title="Відправити ТП">
+                                  {sendingVerification === user.id ? (<><RefreshCw size={16} className="spinning" /><span>Відправка...</span></>) : (<><span>Відправити ТП</span></>)}
+                                </button>
+                              </div>
+                            )}
+                            {/* Трейди / Виводи / Депозити — згортання та оновлення */}
+                            <div className="worker-users-subsection">
+                              <div className="worker-users-subsection-header-wrapper">
+                                <button className="worker-users-subsection-header" onClick={() => setExpandedSections((prev) => ({ ...prev, [user.id]: { ...prev[user.id], trades: !prev[user.id]?.trades } }))} type="button">
+                                  <h3 className="worker-users-subsection-title">Трейди ({user.trades?.length || 0})</h3>
+                                  <span className="worker-users-subsection-arrow">{expandedSections[user.id]?.trades ? '▲' : '▼'}</span>
+                                </button>
+                                {user.chat_id && (
+                                  <button className="worker-users-subsection-refresh-btn" onClick={(e) => { e.stopPropagation(); user.chat_id && updateSection(user.id, user.chat_id, 'trades') }} disabled={updatingSection?.userId === user.id && updatingSection?.section === 'trades'} title="Оновити трейди">
+                                    <RefreshCw size={16} className={updatingSection?.userId === user.id && updatingSection?.section === 'trades' ? 'spinning' : ''} />
+                                  </button>
+                                )}
+                              </div>
+                              {expandedSections[user.id]?.trades && (
+                                <div className="worker-users-subsection-content">
+                                  {user.trades && user.trades.length > 0 ? (
+                                    <div className="worker-users-subsection-grid">
+                                      {user.trades.map((trade: any) => (
+                                        <div key={trade.id} className="worker-users-subsection-card">
+                                          {Object.entries(trade).map(([key, value]) => {
+                                            if (key === 'id' || key === 'chat_id') return null
+                                            const label = { token: 'Токен', amount: 'Сума', isActive: 'Активний', isWin: 'Виграш', created_at: 'Створено' }[key] || key
+                                            let displayValue: string = value != null && value !== undefined ? String(value) : '—'
+                                            if (key === 'isActive' || key === 'isWin') displayValue = value === true || value === 'true' ? 'Так' : 'Ні'
+                                            return (
+                                              <div key={key} className="worker-users-subsection-item">
+                                                <span className="worker-users-subsection-label">{label}:</span>
+                                                <span className="worker-users-subsection-value">{displayValue}</span>
+                                              </div>
+                                            )
+                                          })}
+                                          {trade.isActive === true && user.chat_id && (
+                                            <div className="worker-users-subsection-actions">
+                                              <button className="worker-users-close-trade-btn worker-users-close-trade-btn--win" onClick={() => user.chat_id && closeTrade(user.id, user.chat_id, trade.id, trade.amount ?? null, true)} disabled={closingTradeId === trade.id} title="Закрити як виграш">{closingTradeId === trade.id ? (<><RefreshCw size={14} className="spinning" /><span>Закриття...</span></>) : (<><Check size={14} /><span>Виграш</span></>)}</button>
+                                              <button className="worker-users-close-trade-btn worker-users-close-trade-btn--loss" onClick={() => user.chat_id && closeTrade(user.id, user.chat_id, trade.id, trade.amount ?? null, false)} disabled={closingTradeId === trade.id} title="Закрити як програш">{closingTradeId === trade.id ? (<><RefreshCw size={14} className="spinning" /><span>Закриття...</span></>) : (<><X size={14} /><span>Програш</span></>)}</button>
+                                            </div>
+                                          )}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <p className="worker-users-subsection-empty">Трейди відсутні</p>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                            <div className="worker-users-subsection">
+                              <div className="worker-users-subsection-header-wrapper">
+                                <button className="worker-users-subsection-header" onClick={() => setExpandedSections((prev) => ({ ...prev, [user.id]: { ...prev[user.id], withdraws: !prev[user.id]?.withdraws } }))} type="button">
+                                  <h3 className="worker-users-subsection-title">Виводи ({user.withdraws?.length || 0})</h3>
+                                  <span className="worker-users-subsection-arrow">{expandedSections[user.id]?.withdraws ? '▲' : '▼'}</span>
+                                </button>
+                                {user.chat_id && (
+                                  <button className="worker-users-subsection-refresh-btn" onClick={(e) => { e.stopPropagation(); user.chat_id && updateSection(user.id, user.chat_id, 'withdraws') }} disabled={updatingSection?.userId === user.id && updatingSection?.section === 'withdraws'} title="Оновити виводи">
+                                    <RefreshCw size={16} className={updatingSection?.userId === user.id && updatingSection?.section === 'withdraws' ? 'spinning' : ''} />
+                                  </button>
+                                )}
+                              </div>
+                              {expandedSections[user.id]?.withdraws && (
+                                <div className="worker-users-subsection-content">
+                                  {user.withdraws && user.withdraws.length > 0 ? (
+                                    <div className="worker-users-subsection-grid">
+                                      {user.withdraws.map((withdraw: any) => (
+                                        <div key={withdraw.id} className="worker-users-subsection-card">
+                                          <div className="worker-users-subsection-item"><span className="worker-users-subsection-label">Сума</span><span className="worker-users-subsection-value">{withdraw.amount ?? '—'}</span></div>
+                                          <div className="worker-users-subsection-item"><span className="worker-users-subsection-label">Статус</span><span className="worker-users-subsection-value">{withdraw.status ?? '—'}</span></div>
+                                          <div className="worker-users-subsection-item"><span className="worker-users-subsection-label">Створено</span><span className="worker-users-subsection-value">{withdraw.created_at ? new Date(withdraw.created_at).toLocaleString('uk-UA') : '—'}</span></div>
+                                          {user.chat_id && (
+                                            <div className="worker-users-subsection-actions">
+                                              <button className="worker-users-return-btn" onClick={() => user.chat_id && returnWithdraw(user.id, user.chat_id, withdraw.id, withdraw.amount ?? null, withdraw.currency ?? null)} disabled={withdraw.isDone === true || returningWithdrawId === withdraw.id} title={withdraw.isDone ? 'Вивід вже повернено' : 'Повернути кошти на баланс'}>
+                                                {returningWithdrawId === withdraw.id ? (<><RefreshCw size={14} className="spinning" /><span>Повертаємо...</span></>) : (<><RotateCcw size={14} /><span>Повернути</span></>)}
+                                              </button>
+                                            </div>
+                                          )}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <p className="worker-users-subsection-empty">Виводи відсутні</p>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                            <div className="worker-users-subsection">
+                              <div className="worker-users-subsection-header-wrapper">
+                                <button className="worker-users-subsection-header" onClick={() => setExpandedSections((prev) => ({ ...prev, [user.id]: { ...prev[user.id], deposits: !prev[user.id]?.deposits } }))} type="button">
+                                  <h3 className="worker-users-subsection-title">Депозити ({user.deposits?.length || 0})</h3>
+                                  <span className="worker-users-subsection-arrow">{expandedSections[user.id]?.deposits ? '▲' : '▼'}</span>
+                                </button>
+                                {user.chat_id && (
+                                  <button className="worker-users-subsection-refresh-btn" onClick={(e) => { e.stopPropagation(); user.chat_id && updateSection(user.id, user.chat_id, 'deposits') }} disabled={updatingSection?.userId === user.id && updatingSection?.section === 'deposits'} title="Оновити депозити">
+                                    <RefreshCw size={16} className={updatingSection?.userId === user.id && updatingSection?.section === 'deposits' ? 'spinning' : ''} />
+                                  </button>
+                                )}
+                              </div>
+                              {expandedSections[user.id]?.deposits && (
+                                <div className="worker-users-subsection-content">
+                                  {user.deposits && user.deposits.length > 0 ? (
+                                    <div className="worker-users-subsection-grid">
+                                      {user.deposits.map((deposit: any) => (
+                                        <div key={deposit.id} className="worker-users-subsection-card">
+                                          <div className="worker-users-subsection-item"><span className="worker-users-subsection-label">URL</span><span className="worker-users-subsection-value">{deposit.url ? <a href={deposit.url} target="_blank" rel="noopener noreferrer" className="worker-users-link">{deposit.url}</a> : '—'}</span></div>
+                                          <div className="worker-users-subsection-item"><span className="worker-users-subsection-label">Сума</span><span className="worker-users-subsection-value">{deposit.amount != null ? String(deposit.amount) : '—'}</span></div>
+                                          <div className="worker-users-subsection-item"><span className="worker-users-subsection-label">Оплачено</span><span className={`worker-users-badge ${deposit.isPayed ? 'worker-users-badge--enabled' : 'worker-users-badge--disabled'}`}>{deposit.isPayed ? 'Так' : 'Ні'}</span></div>
+                                          {!deposit.isPayed && user.chat_id && (
+                                            <div className="worker-users-subsection-actions">
+                                              <button className="worker-users-process-deposit-btn" onClick={() => user.chat_id && processDeposit(user.id, user.chat_id, deposit.id, deposit.amount ?? null, deposit.currency ?? null)} disabled={processingDepositId === deposit.id} title="Зарахувати кошти на баланс">
+                                                {processingDepositId === deposit.id ? (<><RefreshCw size={14} className="spinning" /><span>Обробка...</span></>) : (<><DollarSign size={14} /><span>Зарахувати</span></>)}
+                                              </button>
+                                            </div>
+                                          )}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <p className="worker-users-subsection-empty">Депозити відсутні</p>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )
+                      })()}
+                    </div>
+                  </>
+                ) : (
+                  <div className="worker-users-loading">Користувача не знайдено</div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="worker-users-search-wrapper">
           <div className="worker-users-search">
             <Search size={20} className="worker-users-search-icon" />
@@ -985,6 +1493,36 @@ const WorkerUsersPage = () => {
             </div>
           ) : (
             <>
+            {totalCount > perPage && (
+              <div className="worker-users-pagination worker-users-pagination--top">
+                <span className="worker-users-pagination-info">
+                  Показано {totalCount === 0 ? 0 : pageStart + 1}–{pageEnd} з {totalCount}
+                </span>
+                <div className="worker-users-pagination-controls">
+                  <button
+                    type="button"
+                    className="worker-users-pagination-btn"
+                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    disabled={currentPage <= 1}
+                    aria-label="Попередня сторінка"
+                  >
+                    <ChevronLeft size={20} />
+                  </button>
+                  <span className="worker-users-pagination-page">
+                    Сторінка {currentPage} з {totalPages}
+                  </span>
+                  <button
+                    type="button"
+                    className="worker-users-pagination-btn"
+                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={currentPage >= totalPages}
+                    aria-label="Наступна сторінка"
+                  >
+                    <ChevronRight size={20} />
+                  </button>
+                </div>
+              </div>
+            )}
             <div className="worker-users-grid">
               {users.map((user) => (
                 <div key={user.id} className="worker-users-card-item" style={(user.blocked ?? false) ? { opacity: 0.6 } : {}}>
@@ -994,14 +1532,41 @@ const WorkerUsersPage = () => {
                         {user.first_name || 'Користувач'} {user.username && `(@${user.username})`}
                       </h3>
                     </div>
-                    <button
-                      className="worker-users-refresh-btn"
-                      onClick={() => user.chat_id && updateUserData(user.id, user.chat_id)}
-                      disabled={updatingUserId === user.id}
-                      title="Оновити дані користувача"
-                    >
-                      {updatingUserId === user.id ? 'Оновлення...' : 'Оновити'}
-                    </button>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      {user.chat_id != null && currentUserEmail && (
+                        <button
+                          type="button"
+                          className="worker-users-favorite-btn"
+                          onClick={() => toggleFavorite(user.chat_id)}
+                          disabled={togglingFavoriteChatId === Number(user.chat_id) || (!favoriteUserChatIds.has(Number(user.chat_id)) && favoritesList.length >= FAVORITES_MAX)}
+                          title={
+                            favoriteUserChatIds.has(Number(user.chat_id))
+                              ? 'Прибрати з улюблених'
+                              : favoritesList.length >= FAVORITES_MAX
+                                ? `Максимум ${FAVORITES_MAX} улюблених. Приберіть когось із списку.`
+                                : 'Додати в улюблені'
+                          }
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            cursor: favoritesList.length >= FAVORITES_MAX && !favoriteUserChatIds.has(Number(user.chat_id)) ? 'not-allowed' : 'pointer',
+                            padding: '4px',
+                            color: favoriteUserChatIds.has(Number(user.chat_id)) ? '#eab308' : 'var(--text-color, #888)',
+                            opacity: favoritesList.length >= FAVORITES_MAX && !favoriteUserChatIds.has(Number(user.chat_id)) ? 0.5 : 1
+                          }}
+                        >
+                          <Star size={20} fill={favoriteUserChatIds.has(Number(user.chat_id)) ? '#eab308' : 'none'} />
+                        </button>
+                      )}
+                      <button
+                        className="worker-users-refresh-btn"
+                        onClick={() => user.chat_id && updateUserData(user.id, user.chat_id)}
+                        disabled={updatingUserId === user.id}
+                        title="Оновити дані користувача"
+                      >
+                        {updatingUserId === user.id ? 'Оновлення...' : 'Оновити'}
+                      </button>
+                    </div>
                   </div>
                   <div className="worker-users-card-section">
                     <span className="worker-users-card-label">Ім'я</span>
