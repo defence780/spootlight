@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState, FormEvent } from 'react'
+import { useEffect, useState, FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import PaginationBar from './PaginationBar'
 import './DepositsPage.css'
 
 const STORAGE_KEY = 'spotlight_user'
@@ -30,6 +31,10 @@ const DepositsPage = () => {
   const [balanceError, setBalanceError] = useState('')
   const [balanceStatus, setBalanceStatus] = useState('')
   const [balanceLoading, setBalanceLoading] = useState(false)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalCount, setTotalCount] = useState(0)
+  const perPage = 10
+  const [debouncedSearch, setDebouncedSearch] = useState('')
 
   const parseBalanceValue = (value: unknown): number | null => {
     if (typeof value === 'number' && !Number.isNaN(value)) {
@@ -44,20 +49,38 @@ const DepositsPage = () => {
     return null
   }
 
-  const fetchDeposits = async () => {
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(searchValue), 400)
+    return () => clearTimeout(t)
+  }, [searchValue])
+
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [searchValue])
+
+  const fetchDeposits = async (page: number, search: string) => {
     setLoading(true)
     setError(null)
     try {
-      const { data, error } = await supabase
+      const from = (page - 1) * perPage
+      const to = from + perPage - 1
+      let query = supabase
         .from('spotlights_deposits')
-        .select('email, amount, created_at')
+        .select('email, amount, created_at', { count: 'exact' })
         .order('created_at', { ascending: false })
-
+      const q = search.trim().toLowerCase()
+      if (q) {
+        query = query.ilike('email', `%${q}%`)
+      }
+      const { data, error, count } = await query.range(from, to)
       if (error) throw error
       setDeposits(data ?? [])
+      setTotalCount(count ?? 0)
     } catch (err: any) {
       console.error('Ошибка загрузки депозитов', err)
       setError(err.message || 'Не удалось загрузить депозиты.')
+      setDeposits([])
+      setTotalCount(0)
     } finally {
       setLoading(false)
     }
@@ -84,14 +107,8 @@ const DepositsPage = () => {
 
   useEffect(() => {
     if (!initialized) return
-    fetchDeposits()
-  }, [initialized])
-
-  const filteredDeposits = useMemo(() => {
-    const value = searchValue.trim().toLowerCase()
-    if (!value) return deposits
-    return deposits.filter((item) => item.email.toLowerCase().includes(value))
-  }, [deposits, searchValue])
+    fetchDeposits(currentPage, debouncedSearch)
+  }, [initialized, currentPage, debouncedSearch])
 
   const formatDate = (value?: string | null) => {
     if (!value) return '—'
@@ -165,7 +182,7 @@ const DepositsPage = () => {
 
       setBalanceStatus('Баланс успешно обновлён.')
       setBalanceLoading(false)
-      fetchDeposits()
+      fetchDeposits(currentPage, debouncedSearch)
 
       if (typeof window !== 'undefined') {
         const storedRaw = window.localStorage.getItem(STORAGE_KEY)
@@ -221,7 +238,7 @@ const DepositsPage = () => {
             value={searchValue}
             onChange={(event) => setSearchValue(event.target.value)}
           />
-          <button className="deposits-subtle-button" onClick={fetchDeposits} disabled={loading}>
+          <button className="deposits-subtle-button" onClick={() => fetchDeposits(currentPage, debouncedSearch)} disabled={loading}>
             Обновить
           </button>
         </div>
@@ -231,11 +248,12 @@ const DepositsPage = () => {
         <div className="deposits-content">
           {loading ? (
             <div className="deposits-loading">Загрузка...</div>
-          ) : filteredDeposits.length === 0 ? (
+          ) : deposits.length === 0 ? (
             <div className="deposits-empty">Депозиты не найдены</div>
           ) : (
+            <>
             <div className="deposits-grid">
-              {filteredDeposits.map((deposit, index) => (
+              {deposits.map((deposit, index) => (
                 <div className="deposits-card-item" key={`${deposit.email}-${deposit.created_at ?? index}`}>
                   <div className="deposits-card-section">
                     <span className="deposits-card-label">Email</span>
@@ -259,6 +277,17 @@ const DepositsPage = () => {
                 </div>
               ))}
             </div>
+            <PaginationBar
+              currentPage={currentPage}
+              totalPages={Math.max(1, Math.ceil(totalCount / perPage))}
+              totalCount={totalCount}
+              perPage={perPage}
+              pageStart={(currentPage - 1) * perPage}
+              pageEnd={Math.min((currentPage - 1) * perPage + deposits.length, totalCount)}
+              onPrev={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              onNext={() => setCurrentPage((p) => Math.min(Math.ceil(totalCount / perPage), p + 1))}
+            />
+            </>
           )}
         </div>
       </div>

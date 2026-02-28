@@ -198,6 +198,12 @@ const AdminTradingPage = () => {
   const [addUserStatus, setAddUserStatus] = useState('')
   const [addUserLoading, setAddUserLoading] = useState(false)
   const itemsPerPage = 10
+  const [workersTotalCount, setWorkersTotalCount] = useState(0)
+  const [totalWithdrawalsCount, setTotalWithdrawalsCount] = useState(0)
+  const [totalDepositsCount, setTotalDepositsCount] = useState(0)
+  const [totalTradesCount, setTotalTradesCount] = useState(0)
+  const [totalNewEmployeeCount, setTotalNewEmployeeCount] = useState(0)
+  const [totalPaymentsCount, setTotalPaymentsCount] = useState(0)
 
   useEffect(() => {
     // Для hr завжди перенаправляємо на new-employee
@@ -216,13 +222,19 @@ const AdminTradingPage = () => {
   }, [tab, isHr])
 
   const handleTabChange = (nextTab: TradingTabKey) => {
-    // Для hr дозволяємо тільки new-employee таб
     if (isHr && nextTab !== 'new-employee') {
       navigate('/admin/trading/new-employee', { replace: true })
       return
     }
     setActiveTab(nextTab)
     navigate(`/admin/trading/${nextTab}`)
+    setCurrentWorkersPage(1)
+    setCurrentWithdrawalsPage(1)
+    setCurrentDepositsPage(1)
+    setCurrentTradesPage(1)
+    setCurrentMessagesPage(1)
+    setCurrentNewEmployeePage(1)
+    setCurrentPaymentsPage(1)
   }
 
   useEffect(() => {
@@ -414,35 +426,32 @@ const AdminTradingPage = () => {
     }
   }
 
-  // Завантажуємо дані залежно від режиму перегляду
   useEffect(() => {
     if (activeTab === 'workers' && initialized) {
       if (workersViewMode === 'workers') {
-        fetchWorkers()
+        fetchWorkers(currentWorkersPage)
       } else {
         fetchAllUsers()
       }
     }
   }, [workersViewMode, activeTab, initialized, currentWorkersPage])
 
-  const fetchWorkers = async () => {
-    console.log('[FETCH_WORKERS] Starting fetchWorkers')
+  const fetchWorkers = async (page: number) => {
     setLoading(true)
     setError(null)
     try {
-      // Завантажуємо воркерів з users (як було раніше)
+      const from = (page - 1) * itemsPerPage
+      const to = from + itemsPerPage - 1
       let query = supabase
         .from('users')
-        .select('id, created_at, chat_id, isAdmin, username, first_name, ref_id, balance, auto_win, is_trading_enable, spam, usdt_amount, rub_amount, verification_on, verification_needed, is_message_sending, comment, panel_disabled, worker_comment')
+        .select('id, created_at, chat_id, isAdmin, username, first_name, ref_id, balance, auto_win, is_trading_enable, spam, usdt_amount, rub_amount, verification_on, verification_needed, is_message_sending, comment, panel_disabled, worker_comment', { count: 'exact' })
         .not('worker_comment', 'is', null)
 
-      // Якщо користувач (spotlights_users) має ref_id такий самий як chat_id у воркера,
-      // то показувати лише цього воркера
       if (currentUserRefId) {
         query = query.eq('chat_id', currentUserRefId)
       }
 
-      const { data, error: fetchError } = await query.order('created_at', { ascending: false })
+      const { data, error: fetchError, count } = await query.order('created_at', { ascending: false }).range(from, to)
 
       if (fetchError) {
         console.error('Supabase error:', fetchError)
@@ -450,210 +459,199 @@ const AdminTradingPage = () => {
       }
 
       const workersData = data || []
+      setWorkersTotalCount(count ?? 0)
+      const workerChatIds = workersData.map((w) => w.chat_id).filter(Boolean) as (string | number)[]
 
-      // Підрахунок кількості користувачів для кожного воркера
-      const workersWithCounts = await Promise.all(
-        workersData.map(async (worker) => {
-          if (!worker.chat_id) {
-            return { ...worker, usersCount: 0 }
-          }
+      // 2. Один батч-запит: кількість користувачів по ref_id (замість N окремих запитів)
+      let usersCountByRefId: Record<string, number> = {}
+      if (workerChatIds.length > 0) {
+        const { data: refIdRows, error: countError } = await supabase
+          .from('users')
+          .select('ref_id')
+          .in('ref_id', workerChatIds)
 
-          const { count, error: countError } = await supabase
-            .from('users')
-            .select('*', { count: 'exact', head: true })
-            .eq('ref_id', worker.chat_id)
+        if (!countError && refIdRows) {
+          refIdRows.forEach((row: { ref_id?: string | number | null }) => {
+            const key = row.ref_id != null ? String(row.ref_id) : ''
+            if (key) usersCountByRefId[key] = (usersCountByRefId[key] || 0) + 1
+          })
+        }
+      }
 
-          if (countError) {
-            console.error('Ошибка подсчета пользователей для воркера', worker.id, countError)
-            return { ...worker, usersCount: 0 }
-          }
-
-          return { ...worker, usersCount: count || 0 }
-        })
-      )
+      const workersWithCounts = workersData.map((worker) => ({
+        ...worker,
+        usersCount: worker.chat_id != null ? (usersCountByRefId[String(worker.chat_id)] || 0) : 0
+      }))
 
       setWorkers(workersWithCounts)
 
-      // Завантажуємо статистику для воркерів (як було раніше)
+      // 3. Батч-запити для статистики воркерів (withdrawals, deposits, trades)
       if (workersWithCounts.length > 0) {
         const statsMap: Record<string | number, { withdrawals: number; deposits: number; trades: number }> = {}
 
-        await Promise.all(
-          workersWithCounts.map(async (worker) => {
-            if (!worker.chat_id) return
+        // Один запит: всі користувачі з ref_id воркерів
+        const { data: workerUsersData } = await supabase
+          .from('users')
+          .select('ref_id, chat_id')
+          .in('ref_id', workerChatIds)
 
-            // Отримуємо всіх користувачів воркера
-            const { data: workerUsers } = await supabase
-              .from('users')
-              .select('chat_id')
-              .eq('ref_id', worker.chat_id)
+        const refIdToUserChatIds: Record<string, (string | number)[]> = {}
+        const chatIdToRefId: Record<string, string> = {}
+        workerChatIds.forEach((id) => {
+          refIdToUserChatIds[String(id)] = []
+        })
+        workerUsersData?.forEach((row: { ref_id?: string | number | null; chat_id?: string | number | null }) => {
+          const refKey = row.ref_id != null ? String(row.ref_id) : ''
+          const chatId = row.chat_id
+          if (refKey && chatId != null) {
+            if (!refIdToUserChatIds[refKey]) refIdToUserChatIds[refKey] = []
+            refIdToUserChatIds[refKey].push(chatId)
+            chatIdToRefId[String(chatId)] = refKey
+          }
+        })
 
-            if (!workerUsers || workerUsers.length === 0) {
-              statsMap[worker.chat_id] = { withdrawals: 0, deposits: 0, trades: 0 }
-              return
-            }
+        const allUserChatIds = Object.values(refIdToUserChatIds).flat()
+        const uniqueUserChatIds = [...new Set(allUserChatIds)]
 
-            const userChatIds = workerUsers.map((u) => u.chat_id).filter(Boolean)
+        // Ініціалізуємо нулями
+        workerChatIds.forEach((id) => {
+          statsMap[id] = { withdrawals: 0, deposits: 0, trades: 0 }
+        })
 
-            // Підраховуємо виводи
-            const { count: withdrawalsCount } = await supabase
-              .from('withdraws')
-              .select('*', { count: 'exact', head: true })
-              .in('chat_id', userChatIds)
+        if (uniqueUserChatIds.length > 0) {
+          const [withdrawsRes, invoicesRes, tradesRes] = await Promise.all([
+            supabase.from('withdraws').select('chat_id').in('chat_id', uniqueUserChatIds),
+            supabase.from('invoices').select('chat_id').in('chat_id', uniqueUserChatIds),
+            supabase.from('trades').select('chat_id').in('chat_id', uniqueUserChatIds)
+          ])
 
-            // Підраховуємо депозити
-            const { count: depositsCount } = await supabase
-              .from('invoices')
-              .select('*', { count: 'exact', head: true })
-              .in('chat_id', userChatIds)
+          const countByRefId = (rows: { chat_id?: string | number | null }[] | null): Record<string, number> => {
+            const out: Record<string, number> = {}
+            workerChatIds.forEach((id) => {
+              out[String(id)] = 0
+            })
+            rows?.forEach((row) => {
+              const refKey = row.chat_id != null ? chatIdToRefId[String(row.chat_id)] : null
+              if (refKey) out[refKey] = (out[refKey] || 0) + 1
+            })
+            return out
+          }
 
-            // Підраховуємо трейди
-            const { count: tradesCount } = await supabase
-              .from('trades')
-              .select('*', { count: 'exact', head: true })
-              .in('chat_id', userChatIds)
+          const wCounts = countByRefId(withdrawsRes.data ?? null)
+          const dCounts = countByRefId(invoicesRes.data ?? null)
+          const tCounts = countByRefId(tradesRes.data ?? null)
 
-            statsMap[worker.chat_id] = {
-              withdrawals: withdrawalsCount || 0,
-              deposits: depositsCount || 0,
-              trades: tradesCount || 0
+          workerChatIds.forEach((id) => {
+            const key = String(id)
+            statsMap[id] = {
+              withdrawals: wCounts[key] || 0,
+              deposits: dCounts[key] || 0,
+              trades: tCounts[key] || 0
             }
           })
-        )
+        }
 
         setWorkerStats(statsMap)
       }
 
-      // Завантажуємо статистику з closer-worker-analytics для клоузерів
-      // Логіка: для кожного клоузера (з users) знаходимо його в analytics-users як клоузера,
-      // і використовуємо його chat_id як closer_chat_id для запитів по лідах та звітах
+      // 4. Батч-запити для analytics (reports, leads по клоузерам)
       console.log('[ANALYTICS] Starting to load analytics stats for', workersWithCounts.length, 'closers')
       if (workersWithCounts.length > 0) {
         const analyticsStatsMap: Record<string | number, { reports: number; activeLeads: number; rejectedLeads: number; closedLeads: number }> = {}
+        const workerChatIdsNum = workerChatIds.map((id) => Number(id)).filter((n) => !Number.isNaN(n))
 
-        await Promise.all(
-          workersWithCounts.map(async (worker) => {
-            if (!worker.chat_id) {
-              return
-            }
+        const { data: analyticsClosers } = await supabase
+          .from('analytics-users')
+          .select('chat_id')
+          .in('chat_id', workerChatIdsNum)
+          .eq('role', 'closer')
 
-            const closerChatId = Number(worker.chat_id)
+        const setOfCloserChatIds = new Set((analyticsClosers ?? []).map((r: { chat_id?: number }) => Number(r.chat_id)).filter((n) => !Number.isNaN(n)))
 
-            try {
-              // Знаходимо клоузера в analytics-users (де role = 'closer')
-              const { data: analyticsCloser, error: analyticsError } = await supabase
-                .from('analytics-users')
-                .select('chat_id, role')
-                .eq('chat_id', closerChatId)
-                .eq('role', 'closer')
-                .maybeSingle()
+        const uniqueCloserIds = new Set<number>()
+        workersWithCounts.forEach((worker) => {
+          if (!worker.chat_id) return
+          const cid = Number(worker.chat_id)
+          if (setOfCloserChatIds.has(cid)) {
+            uniqueCloserIds.add(cid)
+          } else if (isSuperAdmin) {
+            uniqueCloserIds.add(cid)
+          } else if (currentUserRefId) {
+            uniqueCloserIds.add(Number(currentUserRefId))
+          }
+        })
 
-              if (analyticsError) {
-                console.error(`[ANALYTICS] Error fetching analytics closer ${closerChatId}:`, analyticsError)
-              }
+        const finalCloserIdPerWorker: Record<string, number | null> = {}
+        workersWithCounts.forEach((worker) => {
+          if (!worker.chat_id) return
+          const cid = Number(worker.chat_id)
+          const inAnalytics = setOfCloserChatIds.has(cid)
+          finalCloserIdPerWorker[String(worker.chat_id)] = inAnalytics
+            ? cid
+            : isSuperAdmin
+              ? cid
+              : currentUserRefId
+                ? Number(currentUserRefId)
+                : null
+        })
 
-              // Якщо клоузер не знайдений в analytics-users, пропускаємо або використовуємо fallback
-              if (!analyticsCloser) {
-                console.log(`[ANALYTICS] Closer ${closerChatId} NOT found in analytics-users as closer`)
-                
-                // Для не-superadmin використовуємо currentUserRefId якщо він є
-                if (!isSuperAdmin && currentUserRefId) {
-                  // Використовуємо currentUserRefId як closer_chat_id
-                  console.log(`[ANALYTICS] Using currentUserRefId as closer_chat_id: ${currentUserRefId}`)
-                } else if (isSuperAdmin) {
-                  // Для superadmin використовуємо chat_id клоузера навіть якщо його немає в analytics-users
-                  console.log(`[ANALYTICS] Superadmin: using closer chat_id ${closerChatId} directly`)
-                } else {
-                  // Якщо клоузер не знайдений і немає currentUserRefId, пропускаємо
-                  console.log(`[ANALYTICS] Skipping closer ${closerChatId} - not found in analytics-users and no currentUserRefId`)
-                  analyticsStatsMap[closerChatId] = { reports: 0, activeLeads: 0, rejectedLeads: 0, closedLeads: 0 }
-                  return
-                }
-              } else {
-                console.log(`[ANALYTICS] Closer ${closerChatId} found in analytics-users`)
-              }
+        const closerIdsArray = [...uniqueCloserIds]
+        const zeros = { reports: 0, activeLeads: 0, rejectedLeads: 0, closedLeads: 0 }
 
-              // Визначаємо closer_chat_id для фільтрації
-              // Використовуємо chat_id клоузера (з users) як closer_chat_id
-              const finalCloserChatId = analyticsCloser ? closerChatId : (isSuperAdmin ? closerChatId : (currentUserRefId ? Number(currentUserRefId) : null))
-              
-              if (!finalCloserChatId) {
-                analyticsStatsMap[closerChatId] = { reports: 0, activeLeads: 0, rejectedLeads: 0, closedLeads: 0 }
-                return
-              }
+        if (closerIdsArray.length > 0) {
+          const [reportsRes, leadsRes] = await Promise.all([
+            supabase.from('worker_reports').select('closer_chat_id').in('closer_chat_id', closerIdsArray),
+            supabase.from('worker_leads').select('closer_chat_id, lead_status').in('closer_chat_id', closerIdsArray)
+          ])
 
-              // Підраховуємо звіти для цього клоузера (всі звіти воркерів, які прив'язані до цього клоузера)
-              const { count: reportsCount, error: reportsError } = await supabase
-                .from('worker_reports')
-                .select('*', { count: 'exact', head: true })
-                .eq('closer_chat_id', finalCloserChatId)
+          const reportsByCloser: Record<number, number> = {}
+          closerIdsArray.forEach((id) => {
+            reportsByCloser[id] = 0
+          })
+          reportsRes.data?.forEach((row: { closer_chat_id?: number }) => {
+            const id = row.closer_chat_id
+            if (id != null) reportsByCloser[id] = (reportsByCloser[id] || 0) + 1
+          })
 
-              if (reportsError) {
-                console.error(`[ANALYTICS] Error counting reports for closer ${finalCloserChatId}:`, reportsError)
-              }
+          const leadsByCloser: Record<number, { active: number; rejected: number; closed: number }> = {}
+          closerIdsArray.forEach((id) => {
+            leadsByCloser[id] = { active: 0, rejected: 0, closed: 0 }
+          })
+          leadsRes.data?.forEach((row: { closer_chat_id?: number; lead_status?: string }) => {
+            const id = row.closer_chat_id
+            const status = row.lead_status
+            if (id == null) return
+            if (!leadsByCloser[id]) leadsByCloser[id] = { active: 0, rejected: 0, closed: 0 }
+            if (status === 'new' || status === 'contacted') leadsByCloser[id].active += 1
+            else if (status === 'rejected') leadsByCloser[id].rejected += 1
+            else if (status === 'closed') leadsByCloser[id].closed += 1
+          })
 
-              // Підраховуємо активні ліди (new + contacted) для цього клоузера
-              const { count: activeLeadsCount, error: activeLeadsError } = await supabase
-                .from('worker_leads')
-                .select('*', { count: 'exact', head: true })
-                .eq('closer_chat_id', finalCloserChatId)
-                .in('lead_status', ['new', 'contacted'])
-
-              if (activeLeadsError) {
-                console.error(`[ANALYTICS] Error counting active leads for closer ${finalCloserChatId}:`, activeLeadsError)
-              }
-
-              // Підраховуємо відмовлені ліди для цього клоузера
-              const { count: rejectedLeadsCount, error: rejectedLeadsError } = await supabase
-                .from('worker_leads')
-                .select('*', { count: 'exact', head: true })
-                .eq('closer_chat_id', finalCloserChatId)
-                .eq('lead_status', 'rejected')
-
-              if (rejectedLeadsError) {
-                console.error(`[ANALYTICS] Error counting rejected leads for closer ${finalCloserChatId}:`, rejectedLeadsError)
-              }
-
-              // Підраховуємо закриті ліди для цього клоузера
-              const { count: closedLeadsCount, error: closedLeadsError } = await supabase
-                .from('worker_leads')
-                .select('*', { count: 'exact', head: true })
-                .eq('closer_chat_id', finalCloserChatId)
-                .eq('lead_status', 'closed')
-
-              if (closedLeadsError) {
-                console.error(`[ANALYTICS] Error counting closed leads for closer ${finalCloserChatId}:`, closedLeadsError)
-              }
-
-              const stats = {
-                reports: reportsCount || 0,
-                activeLeads: activeLeadsCount || 0,
-                rejectedLeads: rejectedLeadsCount || 0,
-                closedLeads: closedLeadsCount || 0
-              }
-
-              // Зберігаємо з різними ключами для сумісності
-              analyticsStatsMap[closerChatId] = stats
-              analyticsStatsMap[String(closerChatId)] = stats
-              if (worker.chat_id && worker.chat_id !== closerChatId && worker.chat_id !== String(closerChatId)) {
-                analyticsStatsMap[worker.chat_id] = stats
-              }
-
-              console.log(`[ANALYTICS] Stats for closer ${closerChatId} (finalCloserChatId: ${finalCloserChatId}):`, stats)
-              console.log(`[ANALYTICS] Found in analytics-users:`, !!analyticsCloser)
-            } catch (err) {
-              console.error(`[ANALYTICS] Error processing analytics for closer ${closerChatId}:`, err)
-              analyticsStatsMap[closerChatId] = { reports: 0, activeLeads: 0, rejectedLeads: 0, closedLeads: 0 }
+          workersWithCounts.forEach((worker) => {
+            const fid = worker.chat_id != null ? finalCloserIdPerWorker[String(worker.chat_id)] : null
+            const stats =
+              fid != null
+                ? {
+                    reports: reportsByCloser[fid] ?? 0,
+                    activeLeads: leadsByCloser[fid]?.active ?? 0,
+                    rejectedLeads: leadsByCloser[fid]?.rejected ?? 0,
+                    closedLeads: leadsByCloser[fid]?.closed ?? 0
+                  }
+                : zeros
+            analyticsStatsMap[worker.chat_id!] = stats
+            analyticsStatsMap[String(worker.chat_id!)] = stats
+          })
+        } else {
+          workersWithCounts.forEach((worker) => {
+            if (worker.chat_id != null) {
+              analyticsStatsMap[worker.chat_id] = zeros
+              analyticsStatsMap[String(worker.chat_id)] = zeros
             }
           })
-        )
+        }
 
         setAnalyticsStats(analyticsStatsMap)
-        console.log('[ANALYTICS] Analytics stats loaded for all closers:', JSON.stringify(analyticsStatsMap, null, 2))
-        console.log('[ANALYTICS] Total closers with stats:', Object.keys(analyticsStatsMap).length)
-        console.log('[ANALYTICS] Closers chat_ids:', workersWithCounts.map(w => ({ chat_id: w.chat_id, id: w.id })))
-      } else {
-        console.log('[ANALYTICS] No closers to load stats for')
+        console.log('[ANALYTICS] Analytics stats loaded for', Object.keys(analyticsStatsMap).length / 2, 'closers')
       }
     } catch (err: any) {
       console.error('Ошибка загрузки воркеров', err)
@@ -1005,8 +1003,7 @@ const AdminTradingPage = () => {
       setAddUserStatus('Користувача успішно додано до клоузера')
       setAddUserLoading(false)
 
-      // Оновлюємо список воркерів
-      await fetchWorkers()
+      await fetchWorkers(currentWorkersPage)
 
       setTimeout(() => {
         closeAddUserModal()
@@ -1018,20 +1015,18 @@ const AdminTradingPage = () => {
     }
   }
 
-  const fetchWithdrawals = async () => {
+  const fetchWithdrawals = async (page: number) => {
     setLoading(true)
     setError(null)
     try {
+      const from = (page - 1) * itemsPerPage
+      const to = from + itemsPerPage - 1
       let query = supabase
         .from('withdraws')
-        .select('*')
+        .select('*', { count: 'exact' })
         .order('created_at', { ascending: false })
-        .limit(100)
 
-      // Якщо є ref_id з spotlights_users, фільтруємо виводи
-      // Показуємо тільки ті, де ref_id користувача (users) дорівнює ref_id з spotlights_users
       if (currentUserRefId) {
-        // Отримуємо всіх користувачів з users, у яких ref_id дорівнює currentUserRefId
         const { data: usersWithRefId } = await supabase
           .from('users')
           .select('chat_id')
@@ -1041,17 +1036,18 @@ const AdminTradingPage = () => {
           const chatIds = usersWithRefId.map((u) => u.chat_id).filter(Boolean)
           query = query.in('chat_id', chatIds)
         } else {
-          // Якщо немає користувачів з таким ref_id, повертаємо порожній список
           setWithdrawals([])
+          setTotalWithdrawalsCount(0)
           setLoading(false)
           return
         }
       }
 
-      const { data, error: fetchError } = await query
+      const { data, error: fetchError, count } = await query.range(from, to)
 
       if (fetchError) throw fetchError
       setWithdrawals(data || [])
+      setTotalWithdrawalsCount(count ?? 0)
 
       // Завантажуємо інформацію про користувачів та воркерів
       if (data && data.length > 0) {
@@ -1153,20 +1149,18 @@ const AdminTradingPage = () => {
     }
   }
 
-  const fetchDeposits = async () => {
+  const fetchDeposits = async (page: number) => {
     setLoading(true)
     setError(null)
     try {
+      const from = (page - 1) * itemsPerPage
+      const to = from + itemsPerPage - 1
       let query = supabase
         .from('invoices')
-        .select('*')
+        .select('*', { count: 'exact' })
         .order('created_at', { ascending: false })
-        .limit(100)
 
-      // Якщо є ref_id з spotlights_users, фільтруємо депозити
-      // Показуємо тільки ті, де ref_id користувача (users) дорівнює ref_id з spotlights_users
       if (currentUserRefId) {
-        // Отримуємо всіх користувачів з users, у яких ref_id дорівнює currentUserRefId
         const { data: usersWithRefId } = await supabase
           .from('users')
           .select('chat_id')
@@ -1176,17 +1170,18 @@ const AdminTradingPage = () => {
           const chatIds = usersWithRefId.map((u) => u.chat_id).filter(Boolean)
           query = query.in('chat_id', chatIds)
         } else {
-          // Якщо немає користувачів з таким ref_id, повертаємо порожній список
           setDeposits([])
+          setTotalDepositsCount(0)
           setLoading(false)
           return
         }
       }
 
-      const { data, error: fetchError } = await query
+      const { data, error: fetchError, count } = await query.range(from, to)
 
       if (fetchError) throw fetchError
       setDeposits(data || [])
+      setTotalDepositsCount(count ?? 0)
 
       // Завантажуємо інформацію про користувачів та воркерів
       if (data && data.length > 0) {
@@ -1315,8 +1310,7 @@ const AdminTradingPage = () => {
         )
       )
 
-      // Оновлюємо список трейдів
-      await fetchTrades()
+      await fetchTrades(currentTradesPage)
     } catch (err: any) {
       console.error('Ошибка закрытия трейда', err)
       setError(err.message || 'Не удалось закрыть трейд.')
@@ -1325,20 +1319,18 @@ const AdminTradingPage = () => {
     }
   }
 
-  const fetchTrades = async () => {
+  const fetchTrades = async (page: number) => {
     setLoading(true)
     setError(null)
     try {
+      const from = (page - 1) * itemsPerPage
+      const to = from + itemsPerPage - 1
       let query = supabase
         .from('trades')
-        .select('*')
+        .select('*', { count: 'exact' })
         .order('created_at', { ascending: false })
-        .limit(100)
 
-      // Якщо є ref_id з spotlights_users, фільтруємо трейди
-      // Показуємо тільки ті, де ref_id користувача (users) дорівнює ref_id з spotlights_users
       if (currentUserRefId) {
-        // Отримуємо всіх користувачів з users, у яких ref_id дорівнює currentUserRefId
         const { data: usersWithRefId } = await supabase
           .from('users')
           .select('chat_id')
@@ -1348,17 +1340,18 @@ const AdminTradingPage = () => {
           const chatIds = usersWithRefId.map((u) => u.chat_id).filter(Boolean)
           query = query.in('chat_id', chatIds)
         } else {
-          // Якщо немає користувачів з таким ref_id, повертаємо порожній список
           setTrades([])
+          setTotalTradesCount(0)
           setLoading(false)
           return
         }
       }
 
-      const { data, error: fetchError } = await query
+      const { data, error: fetchError, count } = await query.range(from, to)
 
       if (fetchError) throw fetchError
       setTrades(data || [])
+      setTotalTradesCount(count ?? 0)
     } catch (err: any) {
       console.error('Ошибка загрузки трейдов', err)
       setError(err.message || 'Не удалось загрузить трейди.')
@@ -1685,8 +1678,7 @@ https://t.me/+faqFs28Xnx85Mjdi`
         throw functionError
       }
 
-      // Оновлюємо список чатів після відправки
-      await fetchNewEmployeeChats()
+      await fetchNewEmployeeChats(currentNewEmployeePage)
     } catch (err: any) {
       console.error('Ошибка отправки сообщения об одобрении', err)
       setError(err.message || 'Не удалось отправить сообщение об одобрении.')
@@ -1695,74 +1687,64 @@ https://t.me/+faqFs28Xnx85Mjdi`
     }
   }
 
-  const fetchNewEmployeeChats = async () => {
+  const fetchNewEmployeeChats = async (page: number) => {
     setLoading(true)
     setError(null)
     try {
-      // Фільтруємо по isDone: true для оброблених, false/null для необроблених
       const isDoneFilter = newEmployeeFilter === 'processed'
-      
-      // Отримуємо заявки з таблиці new-employee
-      const { data: applications, error: applicationsError } = await supabase
+      const from = (page - 1) * itemsPerPage
+      const to = from + itemsPerPage - 1
+
+      let query = supabase
         .from('new-employee')
-        .select('*')
+        .select('*', { count: 'exact' })
         .order('created_at', { ascending: false })
 
+      if (isDoneFilter) {
+        query = query.eq('isDone', true)
+      } else {
+        query = query.or('isDone.eq.false,isDone.is.null')
+      }
+
+      const { data: applications, error: applicationsError, count } = await query.range(from, to)
+
       if (applicationsError) throw applicationsError
-      
-      // Фільтруємо заявки по isDone
-      const filteredApplications = (applications || []).filter(app => {
-        if (isDoneFilter) {
-          return app.isDone === true
-        } else {
-          return app.isDone === false || app.isDone === null || app.isDone === undefined
-        }
-      })
-      
-      console.log(`[FETCH-CHATS] Filter: ${newEmployeeFilter} (isDoneFilter=${isDoneFilter}), Total applications: ${applications?.length || 0}, Filtered: ${filteredApplications.length}`)
-      
-      if (filteredApplications.length > 0) {
-        // Отримуємо унікальні chat_id для отримання username та повідомлень
-        const uniqueChatIds = filteredApplications.map(app => app.chat_id).filter(Boolean)
-        
-        // Отримуємо username для всіх користувачів
+
+      setTotalNewEmployeeCount(count ?? 0)
+      const list = applications || []
+
+      if (list.length > 0) {
+        const uniqueChatIds = list.map((app: any) => app.chat_id).filter(Boolean)
+
         const { data: usersData } = await supabase
           .from('users')
           .select('chat_id, username')
           .in('chat_id', uniqueChatIds)
-        
-        // Створюємо мапу chat_id -> username
+
         const usernameMap = new Map<number | string, string | null>()
-        usersData?.forEach(user => {
-          if (user.chat_id) {
-            usernameMap.set(user.chat_id, user.username)
-          }
+        usersData?.forEach((user: any) => {
+          if (user.chat_id) usernameMap.set(user.chat_id, user.username)
         })
-        
-        // Отримуємо повідомлення для цих заявок
+
         const { data: messagesData } = await supabase
           .from('new-employee-messages')
           .select('*')
           .in('chat_id', uniqueChatIds)
           .order('created_at', { ascending: false })
-        
-        // Створюємо мапу chat_id -> messages
+
         const messagesMap = new Map<string | number, any[]>()
-        messagesData?.forEach(msg => {
+        messagesData?.forEach((msg: any) => {
           const chatId = msg.chat_id
-          if (!messagesMap.has(chatId)) {
-            messagesMap.set(chatId, [])
-          }
+          if (!messagesMap.has(chatId)) messagesMap.set(chatId, [])
           messagesMap.get(chatId)!.push(msg)
         })
-        
-        // Об'єднуємо заявки з повідомленнями та username
-        const chatsWithData = filteredApplications.map(app => ({
+
+        const chatsWithData = list.map((app: any) => ({
           ...app,
           username: usernameMap.get(app.chat_id) || app.username || null,
           messages: messagesMap.get(app.chat_id) || []
         }))
-        
+
         setNewEmployeeChats(chatsWithData)
       } else {
         setNewEmployeeChats([])
@@ -1796,8 +1778,7 @@ https://t.me/+faqFs28Xnx85Mjdi`
 
       console.log(`[UPDATE-STATUS] Updated ${updateData?.length || 0} application(s) for chat_id ${chatId}`)
 
-      // Оновлюємо список чатів
-      await fetchNewEmployeeChats()
+      await fetchNewEmployeeChats(currentNewEmployeePage)
     } catch (err: any) {
       console.error('Ошибка обновления статуса заявки', err)
       setError(err.message || 'Не удалось обновить статус заявки.')
@@ -1806,17 +1787,21 @@ https://t.me/+faqFs28Xnx85Mjdi`
     }
   }
 
-  const fetchPayments = async () => {
+  const fetchPayments = async (page: number) => {
     setLoading(true)
     setError(null)
     try {
-      const { data, error: fetchError } = await supabase
+      const from = (page - 1) * itemsPerPage
+      const to = from + itemsPerPage - 1
+      const { data, error: fetchError, count } = await supabase
         .from('payments')
-        .select('*')
+        .select('*', { count: 'exact' })
         .order('created_at', { ascending: false })
+        .range(from, to)
 
       if (fetchError) throw fetchError
       setPayments(data || [])
+      setTotalPaymentsCount(count ?? 0)
     } catch (err: any) {
       console.error('Ошибка загрузки платежей', err)
       setError(err.message || 'Не удалось загрузить платежи.')
@@ -1910,7 +1895,7 @@ https://t.me/+faqFs28Xnx85Mjdi`
       if (error) throw error
 
       setPaymentFormLoading(false)
-      fetchPayments()
+      fetchPayments(currentPaymentsPage)
       setTimeout(() => {
         closePaymentForm()
       }, 300)
@@ -1926,7 +1911,7 @@ https://t.me/+faqFs28Xnx85Mjdi`
     try {
       const { error } = await supabase.from('payments').delete().eq('id', id)
       if (error) throw error
-      fetchPayments()
+      fetchPayments(currentPaymentsPage)
     } catch (err: any) {
       console.error('Ошибка удаления платежа', err)
       alert(err.message || 'Не удалось удалить платеж.')
@@ -1935,7 +1920,7 @@ https://t.me/+faqFs28Xnx85Mjdi`
 
   useEffect(() => {
     if (activeTab === 'new-employee') {
-      fetchNewEmployeeChats()
+      setCurrentNewEmployeePage(1)
     }
   }, [newEmployeeFilter, activeTab])
 
@@ -1955,44 +1940,15 @@ https://t.me/+faqFs28Xnx85Mjdi`
   useEffect(() => {
     if (!initialized) return
     if (activeTab === 'workers') {
-      if (workersViewMode === 'workers') {
-        fetchWorkers()
-      } else {
-        fetchAllUsers()
-      }
-      setCurrentWorkersPage(1)
-    } else if (activeTab === 'withdrawals') {
-      fetchWithdrawals()
-      setCurrentWithdrawalsPage(1)
-    } else if (activeTab === 'deposits') {
-      fetchDeposits()
-      setCurrentDepositsPage(1)
-    } else if (activeTab === 'trades') {
-      fetchTrades()
-      setCurrentTradesPage(1)
-    } else if (activeTab === 'messages') {
-      fetchMessages()
-      setCurrentMessagesPage(1)
-    } else if (activeTab === 'new-employee') {
-      fetchNewEmployeeChats()
-      setCurrentNewEmployeePage(1)
-    } else if (activeTab === 'payments') {
-      fetchPayments()
-      setCurrentPaymentsPage(1)
-    }
-  }, [initialized, activeTab, currentUserRefId])
-
-  // Функція для обчислення пагінації
-  const getPaginatedData = <T,>(data: T[], currentPage: number, itemsPerPage: number) => {
-    const startIndex = (currentPage - 1) * itemsPerPage
-    const endIndex = startIndex + itemsPerPage
-    return {
-      paginatedData: data.slice(startIndex, endIndex),
-      totalPages: Math.ceil(data.length / itemsPerPage),
-      currentPage,
-      totalItems: data.length
-    }
-  }
+      if (workersViewMode === 'workers') fetchWorkers(currentWorkersPage)
+      else fetchAllUsers()
+    } else if (activeTab === 'withdrawals') fetchWithdrawals(currentWithdrawalsPage)
+    else if (activeTab === 'deposits') fetchDeposits(currentDepositsPage)
+    else if (activeTab === 'trades') fetchTrades(currentTradesPage)
+    else if (activeTab === 'messages') fetchMessages()
+    else if (activeTab === 'new-employee') fetchNewEmployeeChats(currentNewEmployeePage)
+    else if (activeTab === 'payments') fetchPayments(currentPaymentsPage)
+  }, [initialized, activeTab, currentUserRefId, currentWorkersPage, currentWithdrawalsPage, currentDepositsPage, currentTradesPage, currentNewEmployeePage, currentPaymentsPage, workersViewMode, newEmployeeFilter])
 
   // Компонент пагінації
   const Pagination = ({ currentPage, totalPages, onPageChange }: { currentPage: number; totalPages: number; onPageChange: (page: number) => void }) => {
@@ -2216,7 +2172,6 @@ https://t.me/+faqFs28Xnx85Mjdi`
                       ) : (
                         <>
                       {(() => {
-                        // Фільтруємо workers за пошуковим запитом
                         const filteredWorkers = workers.filter((worker) => {
                           if (!workersSearchQuery.trim()) return true
                           const query = workersSearchQuery.toLowerCase().trim()
@@ -2226,8 +2181,7 @@ https://t.me/+faqFs28Xnx85Mjdi`
                           const workerComment = worker.worker_comment?.toLowerCase() || ''
                           return username.includes(query) || firstName.includes(query) || chatId.includes(query) || workerComment.includes(query)
                         })
-                        
-                        const { paginatedData, totalPages } = getPaginatedData(filteredWorkers, currentWorkersPage, itemsPerPage)
+                        const totalPages = Math.max(1, Math.ceil(workersTotalCount / itemsPerPage))
                         return (
                           <>
                             <Pagination
@@ -2247,19 +2201,7 @@ https://t.me/+faqFs28Xnx85Mjdi`
                               <div className="admin-trading-stats-card">
                                 <h3 className="admin-trading-stats-title">Статистика по клоузерам</h3>
                                 <div className="admin-trading-worker-stats-grid">
-                                  {(() => {
-                                    // Фільтруємо workers для статистики теж
-                                    const filteredWorkersForStats = workers.filter((worker) => {
-                                      if (!workersSearchQuery.trim()) return true
-                                      const query = workersSearchQuery.toLowerCase().trim()
-                                      const username = worker.username?.toLowerCase() || ''
-                                      const firstName = worker.first_name?.toLowerCase() || ''
-                                      const chatId = String(worker.chat_id || '').toLowerCase()
-                                      const workerComment = worker.worker_comment?.toLowerCase() || ''
-                                      return username.includes(query) || firstName.includes(query) || chatId.includes(query) || workerComment.includes(query)
-                                    })
-                                    return filteredWorkersForStats
-                                  })().map((worker) => {
+                                  {filteredWorkers.map((worker) => {
                                     return (
                                       <div key={worker.id} className="admin-trading-worker-stats-item">
                                         <div className="admin-trading-worker-stats-header">
@@ -2345,7 +2287,7 @@ https://t.me/+faqFs28Xnx85Mjdi`
                               </div>
                             )}
                             <div className="admin-trading-workers-grid">
-                              {paginatedData.map((worker) => (
+                              {filteredWorkers.map((worker) => (
                         <div key={worker.id} className="admin-trading-worker-card">
                           <div className="admin-trading-worker-card-section">
                             <span className="admin-trading-worker-card-label">Ім'я</span>
@@ -2731,7 +2673,7 @@ https://t.me/+faqFs28Xnx85Mjdi`
                   ) : (
                     <>
                       {(() => {
-                        const { paginatedData, totalPages } = getPaginatedData(withdrawals, currentWithdrawalsPage, itemsPerPage)
+                        const totalPages = Math.max(1, Math.ceil(totalWithdrawalsCount / itemsPerPage))
                         return (
                           <>
                             <Pagination
@@ -2939,7 +2881,7 @@ https://t.me/+faqFs28Xnx85Mjdi`
                         </div>
                       )}
                             <div className="admin-trading-workers-grid">
-                            {paginatedData.map((withdraw) => {
+                            {withdrawals.map((withdraw) => {
                         const withdrawFieldLabels: Record<string, string> = {
                           amount: 'Сума',
                           status: 'Статус',
@@ -3263,7 +3205,7 @@ https://t.me/+faqFs28Xnx85Mjdi`
                         </div>
                       )}
                             {(() => {
-                              const { paginatedData, totalPages } = getPaginatedData(deposits, currentDepositsPage, itemsPerPage)
+                              const totalPages = Math.max(1, Math.ceil(totalDepositsCount / itemsPerPage))
                               return (
                                 <>
                                   <Pagination
@@ -3272,7 +3214,7 @@ https://t.me/+faqFs28Xnx85Mjdi`
                                     onPageChange={setCurrentDepositsPage}
                                   />
                                   <div className="admin-trading-workers-grid">
-                                    {paginatedData.map((deposit) => {
+                                    {deposits.map((deposit) => {
                                       const user = depositsUserInfo[deposit.chat_id]
                                       const worker = user?.ref_id ? depositsWorkerInfo[user.ref_id] : null
 
@@ -3424,7 +3366,7 @@ https://t.me/+faqFs28Xnx85Mjdi`
                   ) : (
                     <>
                       {(() => {
-                        const { paginatedData, totalPages } = getPaginatedData(trades, currentTradesPage, itemsPerPage)
+                        const totalPages = Math.max(1, Math.ceil(totalTradesCount / itemsPerPage))
                         return (
                           <>
                             <Pagination
@@ -3433,7 +3375,7 @@ https://t.me/+faqFs28Xnx85Mjdi`
                               onPageChange={setCurrentTradesPage}
                             />
                             <div className="admin-trading-workers-grid">
-                            {paginatedData.map((trade) => {
+                            {trades.map((trade) => {
                         const tradeFieldLabels: Record<string, string> = {
                           token: 'Токен',
                           amount: 'Сума',
@@ -3728,12 +3670,12 @@ https://t.me/+faqFs28Xnx85Mjdi`
                             return timeB - timeA
                           })
 
-                        const { paginatedData, totalPages } = getPaginatedData(chats, currentNewEmployeePage, itemsPerPage)
+                        const totalPages = Math.max(1, Math.ceil(totalNewEmployeeCount / itemsPerPage))
 
                         return (
                           <div className="admin-trading-new-employee-list">
                             <div className="admin-trading-recipients-header">
-                              <h3>Заявки нових співробітників ({chats.length})</h3>
+                              <h3>Заявки нових співробітників ({totalNewEmployeeCount})</h3>
                               <div style={{ display: 'flex', gap: '12px', marginTop: '16px' }}>
                                 <button
                                   onClick={() => {
@@ -3774,7 +3716,7 @@ https://t.me/+faqFs28Xnx85Mjdi`
                               </div>
                             </div>
                             <div className="admin-trading-recipients-grid">
-                              {paginatedData.map((chat) => (
+                              {chats.map((chat) => (
                                 <div
                                   key={String(chat.chatId)}
                                   className="admin-trading-recipient-card"
@@ -4080,7 +4022,7 @@ https://t.me/+faqFs28Xnx85Mjdi`
                       value={paymentSearch}
                       onChange={(e) => setPaymentSearch(e.target.value)}
                     />
-                    <button className="admin-trading-subtle-button" onClick={fetchPayments} disabled={loading}>
+                    <button className="admin-trading-subtle-button" onClick={() => fetchPayments(currentPaymentsPage)} disabled={loading}>
                       Обновить
                     </button>
                     {isSuperAdmin && (
@@ -4102,7 +4044,7 @@ https://t.me/+faqFs28Xnx85Mjdi`
                   ) : (
                     <>
                       {(() => {
-                        const { paginatedData, totalPages } = getPaginatedData(filteredPayments, currentPaymentsPage, itemsPerPage)
+                        const totalPages = Math.max(1, Math.ceil(totalPaymentsCount / itemsPerPage))
                         return (
                           <>
                             <div className="admin-trading-payments-table-container">
@@ -4120,7 +4062,7 @@ https://t.me/+faqFs28Xnx85Mjdi`
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {paginatedData.map((payment: any) => (
+                                  {filteredPayments.map((payment: any) => (
                                     <tr key={payment.id}>
                                       <td>{payment.closer}</td>
                                       <td>{payment.smm}</td>

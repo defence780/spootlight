@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import PaginationBar from './PaginationBar'
 import './WorkerReportsPage.css'
 
 interface WorkerReport {
@@ -38,13 +39,20 @@ const WorkerReportsPage = () => {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [closerInfo, setCloserInfo] = useState<{ username?: string | null; first_name?: string | null } | null>(null)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalCount, setTotalCount] = useState(0)
+  const perPage = 10
 
   useEffect(() => {
     if (closerChatId) {
       fetchCloserInfo()
-      fetchReports(Number(closerChatId))
+      setCurrentPage(1)
     }
   }, [closerChatId])
+
+  useEffect(() => {
+    if (closerChatId) fetchReports(Number(closerChatId), currentPage)
+  }, [closerChatId, currentPage])
 
   const fetchCloserInfo = async () => {
     if (!closerChatId) return
@@ -67,28 +75,29 @@ const WorkerReportsPage = () => {
     }
   }
 
-  const fetchReports = async (closerChatId: number) => {
+  const fetchReports = async (closerChatId: number, page: number) => {
     setLoading(true)
     setError(null)
     try {
-      console.log('[FETCH_REPORTS] Fetching reports for closer_chat_id:', closerChatId)
-      const { data, error } = await supabase
+      const from = (page - 1) * perPage
+      const to = from + perPage - 1
+      const { data, error: fetchError, count } = await supabase
         .from('worker_reports')
-        .select('*')
+        .select('*', { count: 'exact' })
         .eq('closer_chat_id', closerChatId)
         .order('created_at', { ascending: false })
+        .range(from, to)
 
-      if (error) {
-        console.error('[FETCH_REPORTS] Error fetching reports:', error)
-        throw error
+      if (fetchError) {
+        console.error('[FETCH_REPORTS] Error fetching reports:', fetchError)
+        throw fetchError
       }
 
-      console.log('[FETCH_REPORTS] Reports fetched:', data?.length || 0, 'reports')
-      console.log('[FETCH_REPORTS] Sample report:', data?.[0])
-      
-      // Отримуємо інформацію про воркерів для кожного звіту
-      if (data && data.length > 0) {
-        const workerChatIds = [...new Set(data.map((r) => r.worker_chat_id).filter(Boolean))]
+      const dataList = data ?? []
+      setTotalCount(count ?? 0)
+
+      if (dataList.length > 0) {
+        const workerChatIds = [...new Set(dataList.map((r) => r.worker_chat_id).filter(Boolean))]
         const { data: workers } = await supabase
           .from('analytics-users')
           .select('chat_id, username, first_name')
@@ -99,12 +108,10 @@ const WorkerReportsPage = () => {
           workersMap.set(w.chat_id, w)
         })
 
-        // Додаємо інформацію про воркера до кожного звіту
-        const reportsWithWorkers = data.map((report) => ({
+        const reportsWithWorkers = dataList.map((report) => ({
           ...report,
           worker: workersMap.get(report.worker_chat_id) || null
         }))
-
         setReports(reportsWithWorkers)
       } else {
         setReports([])
@@ -112,6 +119,8 @@ const WorkerReportsPage = () => {
     } catch (err: any) {
       console.error('Ошибка загрузки звітів', err)
       setError(err.message || 'Не удалось загрузить звіти.')
+      setReports([])
+      setTotalCount(0)
     } finally {
       setLoading(false)
     }
@@ -183,6 +192,7 @@ const WorkerReportsPage = () => {
             <p>Звіти не знайдені</p>
           </div>
         ) : (
+          <>
           <div className="worker-reports-list">
             {reports.map((report) => {
               const workerName = report.worker 
@@ -255,6 +265,17 @@ const WorkerReportsPage = () => {
               )
             })}
           </div>
+          <PaginationBar
+            currentPage={currentPage}
+            totalPages={Math.max(1, Math.ceil(totalCount / perPage))}
+            totalCount={totalCount}
+            perPage={perPage}
+            pageStart={(currentPage - 1) * perPage}
+            pageEnd={Math.min((currentPage - 1) * perPage + reports.length, totalCount)}
+            onPrev={() => setCurrentPage((p) => Math.max(1, p - 1))}
+            onNext={() => setCurrentPage((p) => Math.min(Math.ceil(totalCount / perPage), p + 1))}
+          />
+          </>
         )}
       </div>
     </div>

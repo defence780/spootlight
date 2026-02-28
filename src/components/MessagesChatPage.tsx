@@ -90,29 +90,27 @@ const MessagesChatPage = () => {
     }
     setError(null)
     try {
-      // Завантажуємо інформацію про отримувача
-      // toChatId - це chat_id користувача (поле to в таблиці messages)
-      const { data: userData } = await supabase
-        .from('users')
-        .select('id, chat_id, first_name, username, ref_id')
-        .eq('chat_id', toChatId)
-        .single()
+      // Паралельно завантажуємо дані користувача та повідомлення
+      const [userResult, messagesResult] = await Promise.all([
+        supabase
+          .from('users')
+          .select('id, chat_id, first_name, username, ref_id')
+          .eq('chat_id', toChatId)
+          .single(),
+        supabase
+          .from('messages')
+          .select('*')
+          .eq('user_id', toChatId)
+          .order('created_at', { ascending: true })
+          .limit(1000)
+      ])
+
+      const { data: userData } = userResult
+      const { data, error: fetchError } = messagesResult
 
       if (userData) {
         setToUser(userData)
-        // currentUserRefId вже встановлений в checkAccess (ref_id воркера/superadmin)
-        // userData.ref_id - це ref_id користувача, з яким ведеться розмова
       }
-
-      // Завантажуємо повідомлення
-      // НОВА СТРУКТУРА: user_id, worker_id, message, sender
-      // Показуємо всі повідомлення, де user_id = toChatId
-      const { data, error: fetchError } = await supabase
-        .from('messages')
-        .select('*')
-        .eq('user_id', toChatId)
-        .order('created_at', { ascending: true })
-        .limit(1000) // Збільшено ліміт для повної історії чату
 
       if (fetchError) {
         console.error('Помилка завантаження повідомлень:', fetchError)
@@ -231,31 +229,14 @@ const MessagesChatPage = () => {
     setMessageText('')
 
     try {
-      console.log('Відправка повідомлення:', {
-        type: 'send_message',
-        ref_id: currentUserRefId || (isSuperAdmin ? toChatId : null),
-        chat_id: toChatId,
-        message: messageToSend,
-        isSuperAdmin
-      })
-
-      // Отримуємо інформацію про користувача, якому відправляється повідомлення
-      // щоб використати user.chat_id та user.ref_id
-      const { data: userData } = await supabase
-        .from('users')
-        .select('chat_id, ref_id')
-        .eq('chat_id', toChatId)
-        .single()
-
-      if (!userData) {
-        throw new Error('Користувача не знайдено')
-      }
+      // Використовуємо toUser зі стану (вже завантажений у fetchMessages), щоб не робити зайвий запит
+      const targetChatId = toUser?.chat_id ?? toChatId
 
       const { error } = await supabase.functions.invoke('logic', {
         body: {
           type: 'send_message',
-          ref_id: currentUserRefId || (isSuperAdmin ? toChatId : null),  // ref_id відправника (воркера/адміна)
-          chat_id: userData.chat_id,  // user.chat_id - chat_id користувача, якому відправляється
+          ref_id: currentUserRefId || (isSuperAdmin ? toChatId : null),
+          chat_id: targetChatId,
           message: messageToSend
         }
       })
@@ -269,8 +250,8 @@ const MessagesChatPage = () => {
 
       console.log('Повідомлення відправлено успішно, очікуємо оновлення...')
 
-      // Очікуємо невелику затримку, щоб повідомлення встигло зберегтися в БД
-      await new Promise(resolve => setTimeout(resolve, 1000))
+      // Коротка затримка для синхронізації з БД перед оновленням списку
+      await new Promise(resolve => setTimeout(resolve, 200))
 
       // Оновлюємо список повідомлень з сервера (без показу loading)
       console.log('Оновлюємо список повідомлень...')

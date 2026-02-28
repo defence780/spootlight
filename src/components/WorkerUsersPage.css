@@ -1237,3 +1237,59 @@
   }
 }
 
+/* Пагінація */
+.worker-users-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 1.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid rgba(102, 126, 234, 0.25);
+}
+
+.worker-users-pagination-info {
+  color: #c3c8ff;
+  font-size: 0.9rem;
+}
+
+.worker-users-pagination-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.worker-users-pagination-page {
+  color: #e3e6ff;
+  font-size: 0.9rem;
+  font-weight: 500;
+  min-width: 8rem;
+  text-align: center;
+}
+
+.worker-users-pagination-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 1px solid rgba(102, 126, 234, 0.35);
+  border-radius: 10px;
+  background: rgba(102, 126, 234, 0.2);
+  color: #e3e6ff;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.15s ease, opacity 0.2s ease;
+}
+
+.worker-users-pagination-btn:hover:not(:disabled) {
+  background: rgba(102, 126, 234, 0.35);
+  transform: translateY(-1px);
+}
+
+.worker-users-pagination-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+

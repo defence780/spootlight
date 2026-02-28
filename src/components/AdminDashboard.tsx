@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import './AdminDashboard.css'
 import { generateCoinSchedule } from '../lib/coinSchedule'
 import { Copy, Eye, EyeOff } from 'lucide-react'
+import PaginationBar from './PaginationBar'
 import './AdminDashboard.css'
 
 const STORAGE_KEY = 'spotlight_user'
@@ -86,6 +87,11 @@ const AdminDashboard = () => {
   const [editCodeInput, setEditCodeInput] = useState('')
   const [adminCodeVisible, setAdminCodeVisible] = useState(false)
   const [copySuccess, setCopySuccess] = useState(false)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [usersTotalCount, setUsersTotalCount] = useState(0)
+  const [depositsTotalCount, setDepositsTotalCount] = useState(0)
+  const [transactionsTotalCount, setTransactionsTotalCount] = useState(0)
+  const perPage = 10
   const coinSchedule = useMemo(() => generateCoinSchedule({ eventCount: 30 }), [])
 
   const parseBalanceValue = (value: unknown): number | null => {
@@ -156,14 +162,17 @@ const AdminDashboard = () => {
     checkAccess()
   }, [navigate])
 
-  const fetchUsers = async () => {
+  const fetchUsers = async (page: number) => {
     setLoading(true)
     setError(null)
     try {
-      const { data, error } = await supabase
+      const from = (page - 1) * perPage
+      const to = from + perPage - 1
+      const { data, error, count } = await supabase
         .from('spotlights_users')
-        .select('email, type, balance, password, created_at, ref_id')
+        .select('email, type, balance, password, created_at, ref_id', { count: 'exact' })
         .order('created_at', { ascending: false })
+        .range(from, to)
 
       if (error) throw error
       const normalizedUsers =
@@ -172,64 +181,82 @@ const AdminDashboard = () => {
           balance: parseBalanceValue(item.balance)
         })) ?? []
       setUsers(normalizedUsers)
+      setUsersTotalCount(count ?? 0)
     } catch (err: any) {
       console.error('Ошибка загрузки пользователей', err)
       setError(err.message || 'Не удалось загрузить пользователей.')
+      setUsers([])
+      setUsersTotalCount(0)
     } finally {
       setLoading(false)
     }
   }
 
-  const fetchDeposits = async () => {
+  const fetchDeposits = async (page: number) => {
     setLoading(true)
     setError(null)
     try {
-      const { data, error } = await supabase
+      const from = (page - 1) * perPage
+      const to = from + perPage - 1
+      const { data, error, count } = await supabase
         .from('spotlights_deposits')
-        .select('email, amount, created_at')
+        .select('email, amount, created_at', { count: 'exact' })
         .order('created_at', { ascending: false })
+        .range(from, to)
 
       if (error) throw error
       setDeposits(data ?? [])
+      setDepositsTotalCount(count ?? 0)
     } catch (err: any) {
       console.error('Ошибка загрузки депозитов', err)
       setError(err.message || 'Не удалось загрузить депозиты.')
+      setDeposits([])
+      setDepositsTotalCount(0)
     } finally {
       setLoading(false)
     }
   }
 
-  const fetchTransactions = async () => {
+  const fetchTransactions = async (page: number) => {
     setLoading(true)
     setError(null)
     try {
-      const { data, error } = await supabase
+      const from = (page - 1) * perPage
+      const to = from + perPage - 1
+      const { data, error, count } = await supabase
         .from('atomic_transactions')
-        .select('*')
+        .select('*', { count: 'exact' })
         .order('created_at', { ascending: false })
-        .limit(1000)
+        .range(from, to)
 
       if (error) throw error
       setTransactions(data ?? [])
+      setTransactionsTotalCount(count ?? 0)
     } catch (err: any) {
       console.error('Ошибка загрузки транзакций', err)
       setError(err.message || 'Не удалось загрузить транзакции.')
+      setTransactions([])
+      setTransactionsTotalCount(0)
     } finally {
       setLoading(false)
     }
   }
 
   useEffect(() => {
+    setCurrentPage(1)
+  }, [activeTab])
+
+  useEffect(() => {
     if (!currentUser) return
 
     if (activeTab === 'users') {
-      fetchUsers()
+      fetchUsers(currentPage)
     } else if (activeTab === 'deposits') {
-      fetchDeposits()
+      fetchDeposits(currentPage)
     } else if (activeTab === 'transactions') {
-      fetchTransactions()
+      fetchTransactions(currentPage)
     }
-  }, [activeTab, currentUser])
+  }, [activeTab, currentUser, currentPage])
 
   const filteredDeposits = useMemo(() => {
     const value = depositSearch.trim().toLowerCase()
@@ -311,7 +338,7 @@ const AdminDashboard = () => {
 
       setBalanceStatus('Баланс успешно обновлён.')
       setBalanceLoading(false)
-      fetchDeposits()
+      fetchDeposits(currentPage)
 
       if (typeof window !== 'undefined') {
         const storedRaw = window.localStorage.getItem(STORAGE_KEY)
@@ -389,7 +416,7 @@ const AdminDashboard = () => {
 
       setAdminStatus('Користувача успішно зроблено адміном.')
       setAdminLoading(false)
-      fetchUsers()
+      fetchUsers(currentPage)
 
       setTimeout(() => {
         closeMakeAdminModal()
@@ -477,7 +504,7 @@ const AdminDashboard = () => {
 
       setEditUserStatus('Користувача успішно оновлено.')
       setEditUserLoading(false)
-      fetchUsers()
+      fetchUsers(currentPage)
 
       setTimeout(() => {
         closeEditUserModal()
@@ -841,6 +868,16 @@ const AdminDashboard = () => {
                 </tbody>
               </table>
             </div>
+            <PaginationBar
+              currentPage={currentPage}
+              totalPages={Math.max(1, Math.ceil(usersTotalCount / perPage))}
+              totalCount={usersTotalCount}
+              perPage={perPage}
+              pageStart={(currentPage - 1) * perPage}
+              pageEnd={Math.min((currentPage - 1) * perPage + users.length, usersTotalCount)}
+              onPrev={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              onNext={() => setCurrentPage((p) => Math.min(Math.ceil(usersTotalCount / perPage), p + 1))}
+            />
               <div className="admin-table-mobile-card">
                 {users.length === 0 ? (
                   <div className="empty-cell">Пользователи не найдены</div>
@@ -913,7 +950,7 @@ const AdminDashboard = () => {
                   onChange={(event) => setDepositSearch(event.target.value)}
                 />
                 <div className="admin-deposits-buttons">
-                  <button className="admin-subtle-button" onClick={fetchDeposits} disabled={loading}>
+                  <button className="admin-subtle-button" onClick={() => fetchDeposits(currentPage)} disabled={loading}>
                     Обновить
                   </button>
                   <button className="admin-primary-button" onClick={() => navigate('/topup')}>
@@ -989,6 +1026,16 @@ const AdminDashboard = () => {
                   ))
                 )}
               </div>
+              <PaginationBar
+                currentPage={currentPage}
+                totalPages={Math.max(1, Math.ceil(depositsTotalCount / perPage))}
+                totalCount={depositsTotalCount}
+                perPage={perPage}
+                pageStart={(currentPage - 1) * perPage}
+                pageEnd={Math.min((currentPage - 1) * perPage + deposits.length, depositsTotalCount)}
+                onPrev={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                onNext={() => setCurrentPage((p) => Math.min(Math.ceil(depositsTotalCount / perPage), p + 1))}
+              />
             </div>
           ) : activeTab === 'transactions' ? (
             <div className="admin-transactions-panel">
@@ -1001,7 +1048,7 @@ const AdminDashboard = () => {
                   onChange={(event) => setTransactionSearch(event.target.value)}
                 />
                 <div className="admin-deposits-buttons">
-                  <button className="admin-subtle-button" onClick={fetchTransactions} disabled={loading}>
+                  <button className="admin-subtle-button" onClick={() => fetchTransactions(currentPage)} disabled={loading}>
                     Обновить
                   </button>
                 </div>
@@ -1134,6 +1181,16 @@ const AdminDashboard = () => {
                   ))
                 )}
               </div>
+              <PaginationBar
+                currentPage={currentPage}
+                totalPages={Math.max(1, Math.ceil(transactionsTotalCount / perPage))}
+                totalCount={transactionsTotalCount}
+                perPage={perPage}
+                pageStart={(currentPage - 1) * perPage}
+                pageEnd={Math.min((currentPage - 1) * perPage + transactions.length, transactionsTotalCount)}
+                onPrev={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                onNext={() => setCurrentPage((p) => Math.min(Math.ceil(transactionsTotalCount / perPage), p + 1))}
+              />
             </div>
           ) : null}
         </div>

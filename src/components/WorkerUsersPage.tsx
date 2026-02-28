@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { Pencil, Check, X, RefreshCw, RotateCcw, DollarSign, Search, Circle } from 'lucide-react'
+import { Pencil, Check, X, RefreshCw, RotateCcw, DollarSign, Search, Circle, ChevronLeft, ChevronRight } from 'lucide-react'
 import './WorkerUsersPage.css'
 
 const STORAGE_KEY = 'spotlight_user'
@@ -107,6 +107,10 @@ const WorkerUsersPage = () => {
   const [updatingManualCorrection, setUpdatingManualCorrection] = useState<number | null>(null)
   const [blockingUserId, setBlockingUserId] = useState<number | null>(null)
   const [blockingLoading, setBlockingLoading] = useState(false)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalCount, setTotalCount] = useState<number>(0)
+  const perPage = 10
+  const [debouncedSearch, setDebouncedSearch] = useState(initialSearchQuery)
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -127,32 +131,42 @@ const WorkerUsersPage = () => {
     navigate('/', { replace: true })
   }, [navigate])
 
-  const fetchWorkerUsers = async () => {
+  const fetchWorkerUsers = async (page: number, search: string) => {
     if (!chatId) return
 
     setLoading(true)
     setError(null)
     try {
-      // Отримуємо інформацію про воркера
+      // Інформація про воркера (при зміні chatId підвантажиться заново)
       const { data: workerData, error: workerError } = await supabase
         .from('users')
         .select('id, chat_id, username, first_name, worker_comment')
         .eq('chat_id', chatId)
         .not('worker_comment', 'is', null)
         .maybeSingle()
+      if (!workerError) setWorkerInfo(workerData)
 
-      if (workerError) {
-        console.error('Ошибка загрузки воркера', workerError)
-      } else {
-        setWorkerInfo(workerData)
-      }
+      const from = (page - 1) * perPage
+      const to = from + perPage - 1
+      const selectFields = 'id, created_at, chat_id, isAdmin, username, first_name, ref_id, balance, auto_win, is_trading_enable, spam, usdt_amount, rub_amount, verification_on, verification_needed, is_message_sending, comment, panel_disabled, worker_comment, all_trades, win_trades, loss_trades, trade_volume, manual_correction, blocked'
 
-      // Отримуємо користувачів воркера
-      const { data, error: fetchError } = await supabase
+      let query = supabase
         .from('users')
-        .select('id, created_at, chat_id, isAdmin, username, first_name, ref_id, balance, auto_win, is_trading_enable, spam, usdt_amount, rub_amount, verification_on, verification_needed, is_message_sending, comment, panel_disabled, worker_comment, all_trades, win_trades, loss_trades, trade_volume, manual_correction, blocked')
+        .select(selectFields, { count: 'exact' })
         .eq('ref_id', chatId)
         .order('created_at', { ascending: false, nullsFirst: false })
+
+      const q = search.trim().toLowerCase()
+      if (q) {
+        const orParts = [
+          `username.ilike.%${q}%`,
+          `first_name.ilike.%${q}%`
+        ]
+        if (/^\d+$/.test(q)) orParts.push(`chat_id.eq.${q}`)
+        query = query.or(orParts.join(','))
+      }
+
+      const { data, error: fetchError, count } = await query.range(from, to)
 
       if (fetchError) {
         console.error('Supabase error:', fetchError)
@@ -160,32 +174,19 @@ const WorkerUsersPage = () => {
       }
 
       const usersData = data || []
+      setTotalCount(count ?? 0)
 
-      // Завантажуємо трейди, виводи та депозити для кожного користувача
+      // Завантажуємо трейди, виводи та депозити лише для користувачів поточної сторінки
       const usersWithData = await Promise.all(
         usersData.map(async (user) => {
           if (!user.chat_id) {
             return { ...user, trades: [], withdraws: [], deposits: [] }
           }
-
           const [tradesResult, withdrawsResult, depositsResult] = await Promise.all([
-            supabase
-              .from('trades')
-              .select('*')
-              .eq('chat_id', user.chat_id)
-              .order('created_at', { ascending: false }),
-            supabase
-              .from('withdraws')
-              .select('*')
-              .eq('chat_id', user.chat_id)
-              .order('created_at', { ascending: false }),
-            supabase
-              .from('invoices')
-              .select('*')
-              .eq('chat_id', user.chat_id)
-              .order('created_at', { ascending: false })
+            supabase.from('trades').select('*').eq('chat_id', user.chat_id).order('created_at', { ascending: false }),
+            supabase.from('withdraws').select('*').eq('chat_id', user.chat_id).order('created_at', { ascending: false }),
+            supabase.from('invoices').select('*').eq('chat_id', user.chat_id).order('created_at', { ascending: false })
           ])
-
           return {
             ...user,
             trades: tradesResult.data || [],
@@ -199,6 +200,8 @@ const WorkerUsersPage = () => {
     } catch (err: any) {
       console.error('Ошибка загрузки пользователей воркера', err)
       setError(err.message || 'Не удалось загрузить пользователей.')
+      setUsers([])
+      setTotalCount(0)
     } finally {
       setLoading(false)
     }
@@ -896,17 +899,34 @@ const WorkerUsersPage = () => {
     }
   }
 
-  useEffect(() => {
-    if (!initialized || !chatId) return
-    fetchWorkerUsers()
-  }, [initialized, chatId])
-
-  // Встановлюємо пошуковий запит при завантаженні сторінки, якщо він переданий через state
+  // Встановлюємо пошуковий запит при завантаженні сторінки
   useEffect(() => {
     if (initialSearchQuery) {
       setSearchQuery(initialSearchQuery)
+      setDebouncedSearch(initialSearchQuery)
     }
   }, [initialSearchQuery])
+
+  // Дебаунс пошуку для запитів до сервера
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(searchQuery), 400)
+    return () => clearTimeout(t)
+  }, [searchQuery])
+
+  // Скидаємо на першу сторінку при зміні пошуку
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [searchQuery])
+
+  // Завантажуємо лише поточну сторінку
+  useEffect(() => {
+    if (!initialized || !chatId) return
+    fetchWorkerUsers(currentPage, debouncedSearch)
+  }, [initialized, chatId, currentPage, debouncedSearch])
+
+  const totalPages = Math.max(1, Math.ceil(totalCount / perPage))
+  const pageStart = (currentPage - 1) * perPage
+  const pageEnd = Math.min(pageStart + users.length, totalCount)
 
   if (!initialized) {
     return null
@@ -961,20 +981,12 @@ const WorkerUsersPage = () => {
             <div className="worker-users-loading">Загрузка...</div>
           ) : users.length === 0 ? (
             <div className="worker-users-empty">
-              <p>Користувачі не знайдені</p>
+              <p>{debouncedSearch.trim() ? 'За пошуком нічого не знайдено' : 'Користувачі не знайдені'}</p>
             </div>
           ) : (
+            <>
             <div className="worker-users-grid">
-              {users
-                .filter((user) => {
-                  if (!searchQuery.trim()) return true
-                  const query = searchQuery.toLowerCase().trim()
-                  const username = user.username?.toLowerCase() || ''
-                  const firstName = user.first_name?.toLowerCase() || ''
-                  const chatId = String(user.chat_id || '').toLowerCase()
-                  return username.includes(query) || firstName.includes(query) || chatId.includes(query)
-                })
-                .map((user) => (
+              {users.map((user) => (
                 <div key={user.id} className="worker-users-card-item" style={(user.blocked ?? false) ? { opacity: 0.6 } : {}}>
                   <div className="worker-users-card-header">
                     <div className="worker-users-card-header-info">
@@ -1790,6 +1802,38 @@ const WorkerUsersPage = () => {
                 </div>
               ))}
             </div>
+
+            {totalCount > perPage && (
+              <div className="worker-users-pagination">
+                <span className="worker-users-pagination-info">
+                  Показано {totalCount === 0 ? 0 : pageStart + 1}–{pageEnd} з {totalCount}
+                </span>
+                <div className="worker-users-pagination-controls">
+                  <button
+                    type="button"
+                    className="worker-users-pagination-btn"
+                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    disabled={currentPage <= 1}
+                    aria-label="Попередня сторінка"
+                  >
+                    <ChevronLeft size={20} />
+                  </button>
+                  <span className="worker-users-pagination-page">
+                    Сторінка {currentPage} з {totalPages}
+                  </span>
+                  <button
+                    type="button"
+                    className="worker-users-pagination-btn"
+                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={currentPage >= totalPages}
+                    aria-label="Наступна сторінка"
+                  >
+                    <ChevronRight size={20} />
+                  </button>
+                </div>
+              </div>
+            )}
+            </>
           )}
         </div>
       </div>

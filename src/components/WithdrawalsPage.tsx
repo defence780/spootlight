@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { NETWORKS, NetworkKey } from '../constants/topupNetworks'
+import PaginationBar from './PaginationBar'
 import './WithdrawalsPage.css'
 
 const STORAGE_KEY = 'spotlight_user'
@@ -62,6 +63,10 @@ const WithdrawalsPage = () => {
   const [editingAddressId, setEditingAddressId] = useState<string | null>(null)
   const [newAddressValue, setNewAddressValue] = useState<string>('')
   const [updatingAddressId, setUpdatingAddressId] = useState<string | null>(null)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalCount, setTotalCount] = useState(0)
+  const perPage = 10
+  const [debouncedSearch, setDebouncedSearch] = useState('')
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -82,20 +87,43 @@ const WithdrawalsPage = () => {
     navigate('/', { replace: true })
   }, [navigate])
 
-  const fetchWithdrawals = async () => {
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(searchValue), 400)
+    return () => clearTimeout(t)
+  }, [searchValue])
+
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [searchValue, statusFilter])
+
+  const fetchWithdrawals = async (page: number, search: string, status: WithdrawalStatus | 'all') => {
     setLoading(true)
     setError(null)
     try {
-      const { data, error } = await supabase
+      const from = (page - 1) * perPage
+      const to = from + perPage - 1
+      let query = supabase
         .from('spotlights_withdrawals')
-        .select('id, email, amount, address, network, comment, status, created_at')
+        .select('id, email, amount, address, network, comment, status, created_at', { count: 'exact' })
         .order('created_at', { ascending: false })
 
+      if (status !== 'all') {
+        query = query.eq('status', status)
+      }
+      const q = search.trim().toLowerCase()
+      if (q) {
+        query = query.or(`email.ilike.%${q}%,address.ilike.%${q}%`)
+      }
+
+      const { data, error, count } = await query.range(from, to)
       if (error) throw error
       setWithdrawals(data ?? [])
+      setTotalCount(count ?? 0)
     } catch (err: any) {
       console.error('Ошибка загрузки заявок на вывод', err)
       setError(err.message || 'Не удалось загрузить заявки.')
+      setWithdrawals([])
+      setTotalCount(0)
     } finally {
       setLoading(false)
     }
@@ -103,20 +131,8 @@ const WithdrawalsPage = () => {
 
   useEffect(() => {
     if (!initialized) return
-    fetchWithdrawals()
-  }, [initialized])
-
-  const filteredWithdrawals = useMemo(() => {
-    const value = searchValue.trim().toLowerCase()
-    return withdrawals.filter((item) => {
-      const matchesSearch =
-        !value ||
-        item.email.toLowerCase().includes(value) ||
-        (item.address?.toLowerCase().includes(value) ?? false)
-      const matchesStatus = statusFilter === 'all' || item.status === statusFilter
-      return matchesSearch && matchesStatus
-    })
-  }, [withdrawals, searchValue, statusFilter])
+    fetchWithdrawals(currentPage, debouncedSearch, statusFilter)
+  }, [initialized, currentPage, debouncedSearch, statusFilter])
 
   const formatDate = (value?: string | null) => {
     if (!value) return '—'
@@ -297,7 +313,7 @@ const WithdrawalsPage = () => {
             <option value="completed">Выполнено</option>
             <option value="rejected">Отклонено</option>
           </select>
-          <button className="withdrawals-subtle-button" onClick={fetchWithdrawals} disabled={loading}>
+          <button className="withdrawals-subtle-button" onClick={() => fetchWithdrawals(currentPage, debouncedSearch, statusFilter)} disabled={loading}>
             Обновить
           </button>
         </div>
@@ -307,12 +323,12 @@ const WithdrawalsPage = () => {
         <div className="withdrawals-content">
           {loading ? (
             <div className="withdrawals-loading">Загрузка...</div>
-          ) : (
-            filteredWithdrawals.length === 0 ? (
+          ) : withdrawals.length === 0 ? (
               <div className="withdrawals-empty">Заявки на вывод не найдены</div>
             ) : (
+              <>
               <div className="withdrawals-grid">
-                {filteredWithdrawals.map((item) => {
+                {withdrawals.map((item) => {
                   const amount = parseAmount(item.amount)
                   return (
                     <div className="withdrawals-card-item" key={item.id}>
@@ -483,7 +499,17 @@ const WithdrawalsPage = () => {
                   )
                 })}
               </div>
-            )
+              <PaginationBar
+                currentPage={currentPage}
+                totalPages={Math.max(1, Math.ceil(totalCount / perPage))}
+                totalCount={totalCount}
+                perPage={perPage}
+                pageStart={(currentPage - 1) * perPage}
+                pageEnd={Math.min((currentPage - 1) * perPage + withdrawals.length, totalCount)}
+                onPrev={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                onNext={() => setCurrentPage((p) => Math.min(Math.ceil(totalCount / perPage), p + 1))}
+              />
+            </>
           )}
         </div>
       </div>

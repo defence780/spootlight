@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import PaginationBar from './PaginationBar'
 import './PaymentsUsersPage.css'
 
 const STORAGE_KEY = 'spotlight_user'
@@ -29,6 +30,19 @@ const PaymentsUsersPage = () => {
     closer_username: '',
     username: ''
   })
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalCount, setTotalCount] = useState(0)
+  const perPage = 10
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(searchTerm), 400)
+    return () => clearTimeout(t)
+  }, [searchTerm])
+
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [searchTerm])
 
   useEffect(() => {
     const checkAccess = async () => {
@@ -44,7 +58,6 @@ const PaymentsUsersPage = () => {
         const parsed: { type?: string } | null = JSON.parse(storedRaw)
         if (parsed?.type === 'superadmin') {
           setIsSuperAdmin(true)
-          fetchUsers()
         } else {
           setError('Тільки суперадмін має доступ до цієї сторінки')
         }
@@ -57,55 +70,66 @@ const PaymentsUsersPage = () => {
     checkAccess()
   }, [])
 
-  const fetchUsers = async () => {
+  const fetchUsers = async (page: number, search: string) => {
     setLoading(true)
     setError(null)
 
     try {
-      const { data, error: fetchError } = await supabase
+      const from = (page - 1) * perPage
+      const to = from + perPage - 1
+      let query = supabase
         .from('users-payments')
-        .select(`
-          id,
-          created_at,
-          username,
-          chat_id,
-          first_name,
-          role,
-          closer_id,
-          can_generate_link
-        `)
+        .select(
+          `id, created_at, username, chat_id, first_name, role, closer_id, can_generate_link`,
+          { count: 'exact' }
+        )
         .order('created_at', { ascending: false })
+      const q = search.trim().toLowerCase()
+      if (q) {
+        const orParts = [
+          `username.ilike.%${q}%`,
+          `first_name.ilike.%${q}%`,
+          `role.ilike.%${q}%`
+        ]
+        if (/^\d+$/.test(q)) orParts.push(`chat_id.eq.${q}`)
+        query = query.or(orParts.join(','))
+      }
+      const { data, error: fetchError, count } = await query.range(from, to)
 
       if (fetchError) {
         throw fetchError
       }
 
-      // Отримуємо username клоузерів для воркерів
+      const usersData = data || []
+      setTotalCount(count ?? 0)
+
       const usersWithCloser = await Promise.all(
-        (data || []).map(async (user) => {
+        usersData.map(async (user: any) => {
           if (user.closer_id) {
             const { data: closerData } = await supabase
               .from('users-payments')
               .select('username')
               .eq('id', user.closer_id)
               .single()
-
-            return {
-              ...user,
-              closer_username: closerData?.username || null
-            }
+            return { ...user, closer_username: closerData?.username || null }
           }
           return { ...user, closer_username: null }
         })
       )
-
       setUsers(usersWithCloser as PaymentsUser[])
     } catch (err: any) {
       setError(err.message || 'Помилка завантаження користувачів')
+      setUsers([])
+      setTotalCount(0)
     } finally {
       setLoading(false)
     }
   }
+
+  useEffect(() => {
+    if (!isSuperAdmin) return
+    fetchUsers(currentPage, debouncedSearch)
+  }, [isSuperAdmin, currentPage, debouncedSearch])
 
   const handleEdit = (user: PaymentsUser) => {
     setEditingUser(user)
@@ -173,25 +197,13 @@ const PaymentsUsersPage = () => {
       }
 
       setEditingUser(null)
-      await fetchUsers()
+      await fetchUsers(currentPage, debouncedSearch)
     } catch (err: any) {
       setError(err.message || 'Помилка оновлення користувача')
     } finally {
       setLoading(false)
     }
   }
-
-  const filteredUsers = users.filter(user => {
-    if (!searchTerm) return true
-    const search = searchTerm.toLowerCase()
-    return (
-      user.username?.toLowerCase().includes(search) ||
-      user.first_name?.toLowerCase().includes(search) ||
-      user.chat_id?.toString().includes(search) ||
-      user.role?.toLowerCase().includes(search) ||
-      user.closer_username?.toLowerCase().includes(search)
-    )
-  })
 
   if (!isSuperAdmin) {
     return (
@@ -209,7 +221,7 @@ const PaymentsUsersPage = () => {
         <h1>Управління користувачами Payments</h1>
         <button 
           className="payments-users-refresh-btn" 
-          onClick={fetchUsers}
+          onClick={() => fetchUsers(currentPage, debouncedSearch)}
           disabled={loading}
         >
           {loading ? 'Завантаження...' : 'Оновити'}
@@ -253,14 +265,14 @@ const PaymentsUsersPage = () => {
                   Завантаження...
                 </td>
               </tr>
-            ) : filteredUsers.length === 0 ? (
+            ) : users.length === 0 ? (
               <tr>
                 <td colSpan={9} className="payments-users-empty">
                   Користувачі не знайдені
                 </td>
               </tr>
             ) : (
-              filteredUsers.map((user) => (
+              users.map((user) => (
                 <tr key={user.id}>
                   <td>{user.id}</td>
                   <td>{user.username || '—'}</td>
@@ -294,6 +306,17 @@ const PaymentsUsersPage = () => {
           </tbody>
         </table>
       </div>
+
+      <PaginationBar
+        currentPage={currentPage}
+        totalPages={Math.max(1, Math.ceil(totalCount / perPage))}
+        totalCount={totalCount}
+        perPage={perPage}
+        pageStart={(currentPage - 1) * perPage}
+        pageEnd={Math.min((currentPage - 1) * perPage + users.length, totalCount)}
+        onPrev={() => setCurrentPage((p) => Math.max(1, p - 1))}
+        onNext={() => setCurrentPage((p) => Math.min(Math.ceil(totalCount / perPage), p + 1))}
+      />
 
       {editingUser && (
         <div className="payments-users-modal-overlay" onClick={() => setEditingUser(null)}>

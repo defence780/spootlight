@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import PaginationBar from './PaginationBar'
 import './AdminAllocationsPage.css'
 
 interface AllocationRecord {
@@ -29,19 +30,27 @@ const AdminAllocationsPage = () => {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [closingAllocationId, setClosingAllocationId] = useState<number | null>(null)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalCount, setTotalCount] = useState(0)
+  const [initialized, setInitialized] = useState(false)
+  const perPage = 10
 
-  const fetchAllocations = async () => {
+  const fetchAllocations = async (page: number) => {
     setLoading(true)
     setError(null)
     try {
-      const { data, error: fetchError } = await supabase
+      const from = (page - 1) * perPage
+      const to = from + perPage - 1
+      const { data, error: fetchError, count } = await supabase
         .from('spotlights_allocations')
         .select(
           `id, amount, percent, status, expired_at, created_at, users_id,
            user:spotlights_users(email),
-           coin:spotlights(symbol, name)`
+           coin:spotlights(symbol, name)`,
+          { count: 'exact' }
         )
         .order('created_at', { ascending: false })
+        .range(from, to)
 
       if (fetchError) throw fetchError
 
@@ -59,8 +68,11 @@ const AdminAllocationsPage = () => {
       }))
 
       setAllocations(mapped)
+      setTotalCount(count ?? 0)
     } catch (err: any) {
       setError(err.message || 'Не удалось загрузить аллокации.')
+      setAllocations([])
+      setTotalCount(0)
     } finally {
       setLoading(false)
     }
@@ -77,7 +89,7 @@ const AdminAllocationsPage = () => {
           if (parsed?.type === 'admin' || parsed?.type === 'superadmin') {
             // Для superadmin - повний доступ
             if (parsed?.type === 'superadmin') {
-              fetchAllocations()
+              setInitialized(true)
               return
             }
 
@@ -96,8 +108,7 @@ const AdminAllocationsPage = () => {
                 return
               }
 
-              // Якщо немає адмінів з ref_id, дозволяємо доступ
-              fetchAllocations()
+              setInitialized(true)
               return
             }
           }
@@ -111,6 +122,11 @@ const AdminAllocationsPage = () => {
 
     checkAccess()
   }, [navigate])
+
+  useEffect(() => {
+    if (!initialized) return
+    fetchAllocations(currentPage)
+  }, [initialized, currentPage])
 
   const formatDate = (value?: string | null) => {
     if (!value) return '—'
@@ -197,8 +213,7 @@ const AdminAllocationsPage = () => {
         }
       }
 
-      // Refresh allocations list
-      await fetchAllocations()
+      await fetchAllocations(currentPage)
     } catch (err: any) {
       console.error('Ошибка закрытия алокации', err)
       setError(err.message || 'Не удалось закрыть алокацию.')
@@ -216,7 +231,7 @@ const AdminAllocationsPage = () => {
             <p>Список созданных аллокаций с суммами, процентами и временем экспирации монеты</p>
           </div>
           <div className="admin-allocations-actions">
-            <button className="admin-allocations-refresh" onClick={fetchAllocations} disabled={loading}>
+            <button className="admin-allocations-refresh" onClick={() => fetchAllocations(currentPage)} disabled={loading}>
               {loading ? 'Обновление...' : 'Обновить'}
             </button>
             <button className="admin-allocations-back" onClick={() => navigate('/admin')}>
@@ -290,6 +305,16 @@ const AdminAllocationsPage = () => {
             </tbody>
           </table>
         </div>
+        <PaginationBar
+          currentPage={currentPage}
+          totalPages={Math.max(1, Math.ceil(totalCount / perPage))}
+          totalCount={totalCount}
+          perPage={perPage}
+          pageStart={(currentPage - 1) * perPage}
+          pageEnd={Math.min((currentPage - 1) * perPage + allocations.length, totalCount)}
+          onPrev={() => setCurrentPage((p) => Math.max(1, p - 1))}
+          onNext={() => setCurrentPage((p) => Math.min(Math.ceil(totalCount / perPage), p + 1))}
+        />
       </div>
     </div>
   )

@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import PaginationBar from './PaginationBar'
 import './SpotlightCenter.css'
 import * as Icons from 'lucide-react'
 import { generateCoinSchedule } from '../lib/coinSchedule'
@@ -96,12 +97,16 @@ const getImageUrl = (img: string): string => {
   return `/${img}`
 }
 
+const PER_PAGE = 9
+
 function SpotlightCenter() {
   const navigate = useNavigate()
   const [spotlights, setSpotlights] = useState<Spotlight[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [currentTime, setCurrentTime] = useState(Date.now())
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalCount, setTotalCount] = useState(0)
   const coinSchedule = useMemo(() => {
     // Стартова дата: поточний момент (щоб всі монети були активні)
     const startDate = new Date()
@@ -276,47 +281,45 @@ function SpotlightCenter() {
     return parts.join(' ') || 'менее минуты'
   }
 
-  // Fetch spotlights from Supabase
-  const fetchSpotlights = async () => {
+  const fetchSpotlights = async (page: number) => {
     try {
       setLoading(true)
-      console.log('Fetching spotlights from Supabase...')
-      
-      const { data, error } = await supabase
+      const from = (page - 1) * PER_PAGE
+      const to = from + PER_PAGE - 1
+      const { data, error: fetchError, count } = await supabase
         .from('spotlights')
-        .select('*')
+        .select('*', { count: 'exact' })
         .order('created_at', { ascending: false })
+        .range(from, to)
 
-      if (error) {
-        console.error('Supabase error:', error)
-        throw error
+      if (fetchError) {
+        console.error('Supabase error:', fetchError)
+        throw fetchError
       }
 
-      console.log('Fetched spotlights:', data)
-      console.log('Number of spotlights:', data?.length || 0)
-      
       setSpotlights(data || [])
+      setTotalCount(count ?? 0)
       setError(null)
     } catch (err: any) {
       setError(err.message)
       console.error('Error fetching spotlights:', err)
+      setSpotlights([])
+      setTotalCount(0)
     } finally {
       setLoading(false)
     }
   }
 
   useEffect(() => {
-    fetchSpotlights()
+    fetchSpotlights(currentPage)
 
-    // Subscribe to real-time changes
     const channel = supabase
       .channel('spotlight_changes')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'spotlight' },
-        (payload) => {
-          console.log('Change received!', payload)
-          fetchSpotlights()
+        () => {
+          fetchSpotlights(currentPage)
         }
       )
       .subscribe()
@@ -324,7 +327,7 @@ function SpotlightCenter() {
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [])
+  }, [currentPage])
 
   return (
     <div className="spotlight-center">
@@ -353,7 +356,8 @@ function SpotlightCenter() {
             <p>Проекты пока отсутствуют</p>
           </div>
         ) : (
-          preparedSpotlights.map(({ spotlight, position, activeCoin }) => (
+          <>
+          {preparedSpotlights.map(({ spotlight, position, activeCoin }) => (
             <div
               key={spotlight.id}
               className="spotlight-card"
@@ -447,7 +451,18 @@ function SpotlightCenter() {
                 )}
               </div>
             </div>
-          ))
+          ))}
+          <PaginationBar
+            currentPage={currentPage}
+            totalPages={Math.max(1, Math.ceil(totalCount / PER_PAGE))}
+            totalCount={totalCount}
+            perPage={PER_PAGE}
+            pageStart={(currentPage - 1) * PER_PAGE}
+            pageEnd={Math.min((currentPage - 1) * PER_PAGE + spotlights.length, totalCount)}
+            onPrev={() => setCurrentPage((p) => Math.max(1, p - 1))}
+            onNext={() => setCurrentPage((p) => Math.min(Math.ceil(totalCount / PER_PAGE), p + 1))}
+          />
+          </>
         )}
       </div>
  
