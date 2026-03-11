@@ -173,8 +173,9 @@ const WorkerUsersPage = () => {
 
   const FAVORITES_MAX = 10
 
-  const toggleFavorite = async (userChatId: string | number) => {
+  const toggleFavorite = async (userChatId: string | number | undefined) => {
     if (!currentUserEmail) return
+    if (userChatId == null) return
     const cid = Number(userChatId)
     if (Number.isNaN(cid)) return
     const isFav = favoriteUserChatIds.has(cid)
@@ -507,7 +508,8 @@ const WorkerUsersPage = () => {
     }
   }
 
-  const updateUserField = async (userId: number, chatId: string | number, field: 'is_trading_enable' | 'verification_on' | 'verification_needed', value: boolean) => {
+  const updateUserField = async (userId: number, chatId: string | number | undefined, field: 'is_trading_enable' | 'verification_on' | 'verification_needed', value: boolean) => {
+    if (chatId == null) return
     setUpdatingField({ userId, field })
     setError(null)
     setSuccessMessage(null)
@@ -796,7 +798,8 @@ const WorkerUsersPage = () => {
     }
   }
 
-  const updateAutoWin = async (userId: number, chatId: string | number, newValue: boolean | null) => {
+  const updateAutoWin = async (userId: number, chatId: string | number | undefined, newValue: boolean | null) => {
+    if (chatId == null) return
     setUpdatingAutoWin(userId)
     setError(null)
     setSuccessMessage(null)
@@ -943,7 +946,8 @@ const WorkerUsersPage = () => {
     }
   }
 
-  const updateManualCorrection = async (userId: number, chatId: string | number, value: boolean) => {
+  const updateManualCorrection = async (userId: number, chatId: string | number | undefined, value: boolean) => {
+    if (chatId == null) return
     setUpdatingManualCorrection(userId)
     setError(null)
     setSuccessMessage(null)
@@ -974,7 +978,8 @@ const WorkerUsersPage = () => {
     }
   }
 
-  const handleBlockUser = async (userId: number, chatId: string | number, currentBlockedStatus: boolean) => {
+  const handleBlockUser = async (userId: number, chatId: string | number | undefined, currentBlockedStatus: boolean) => {
+    if (chatId == null) return
     setBlockingUserId(userId)
     setBlockingLoading(true)
     setError(null)

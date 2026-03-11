@@ -21,6 +21,34 @@ interface WorkerReport {
   } | null
 }
 
+const getDayKey = (value?: string | null): string | null => {
+  if (!value) return null
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+const keepLatestTodayReportPerWorker = (reports: WorkerReport[]): WorkerReport[] => {
+  const now = new Date()
+  const todayDayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+  const seenTodayWorkers = new Set<number>()
+  const filtered: WorkerReport[] = []
+
+  for (const report of reports) {
+    const dayKey = getDayKey(report.created_at)
+    if (dayKey !== todayDayKey) {
+      filtered.push(report)
+      continue
+    }
+
+    if (seenTodayWorkers.has(report.worker_chat_id)) continue
+    seenTodayWorkers.add(report.worker_chat_id)
+    filtered.push(report)
+  }
+
+  return filtered
+}
+
 const getReportImageUrl = (report: WorkerReport) => {
   if (report.message_type !== 'photo' || !report.file_id) return null
 
@@ -93,7 +121,7 @@ const WorkerReportsPage = () => {
         throw fetchError
       }
 
-      const dataList = data ?? []
+      const dataList = keepLatestTodayReportPerWorker((data ?? []) as WorkerReport[])
       setTotalCount(count ?? 0)
 
       if (dataList.length > 0) {

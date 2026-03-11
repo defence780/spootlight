@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo, useCallback } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { X, RotateCcw, RefreshCw, User, Check, Search, Star, ChevronDown, ChevronUp } from 'lucide-react'
+import { X, RotateCcw, RefreshCw, User, Check, Search, Star, ChevronUp } from 'lucide-react'
 import './AdminTradingPage.css'
 import { DEFAULT_TRADING_TAB, TRADING_TABS, TradingTabKey } from '../types/trading'
 
@@ -34,6 +34,10 @@ interface Worker {
   worker_comment?: string | null
   usersCount?: number
   blocked?: boolean
+  all_trades?: number | null
+  win_trades?: number | null
+  loss_trades?: number | null
+  trade_volume?: number | string | null
   closerComment?: string | null
   closerName?: string | null
   closerUsername?: string | null
@@ -104,6 +108,91 @@ interface WorkerPoint {
   created_by: number
 }
 
+const getDayKey = (value?: string | null): string | null => {
+  if (!value) return null
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+const keepLatestTodayReportPerWorker = (reports: WorkerReport[], todayDayKey: string): WorkerReport[] => {
+  const seenTodayWorkers = new Set<number>()
+  const filtered: WorkerReport[] = []
+
+  for (const report of reports) {
+    const dayKey = getDayKey(report.created_at)
+    if (dayKey !== todayDayKey) {
+      filtered.push(report)
+      continue
+    }
+
+    if (seenTodayWorkers.has(report.worker_chat_id)) {
+      continue
+    }
+
+    seenTodayWorkers.add(report.worker_chat_id)
+    filtered.push(report)
+  }
+
+  return filtered
+}
+
+const buildReportImageCandidates = (fileId?: string | null): string[] => {
+  const rawFileId = fileId?.trim()
+  if (!rawFileId) return []
+
+  if (/^https?:\/\//i.test(rawFileId)) {
+    return [rawFileId]
+  }
+
+  const base = (import.meta.env.VITE_TELEGRAM_FILE_PROXY_URL as string | undefined)?.trim()
+  if (!base) return []
+
+  const encodedFileId = encodeURIComponent(rawFileId)
+  const separator = base.includes('?') ? '&' : '?'
+  const candidates = [
+    `${base}${separator}file_id=${encodedFileId}`,
+    `${base}${separator}fileId=${encodedFileId}`,
+    base.endsWith('/') ? `${base}${encodedFileId}` : `${base}/${encodedFileId}`
+  ]
+
+  if (base.includes('{file_id}')) {
+    candidates.unshift(base.replace('{file_id}', encodedFileId))
+  }
+
+  return [...new Set(candidates)]
+}
+
+const ReportImagePreview = ({ fileId }: { fileId: string }) => {
+  const candidates = useMemo(() => buildReportImageCandidates(fileId), [fileId])
+  const [candidateIndex, setCandidateIndex] = useState(0)
+  const [failedAll, setFailedAll] = useState(false)
+
+  useEffect(() => {
+    setCandidateIndex(0)
+    setFailedAll(false)
+  }, [fileId])
+
+  if (candidates.length === 0 || failedAll) return null
+
+  const src = candidates[candidateIndex] || candidates[0]
+
+  return (
+    <img
+      src={src}
+      alt="Скріншот звіту"
+      style={{ maxWidth: '100%', borderRadius: '8px', border: '1px solid #e5e7eb' }}
+      onError={() => {
+        if (candidateIndex < candidates.length - 1) {
+          setCandidateIndex((prev) => prev + 1)
+          return
+        }
+        setFailedAll(true)
+      }}
+    />
+  )
+}
+
 const AdminTradingPage = () => {
   const navigate = useNavigate()
   const { tab } = useParams<{ tab?: string }>()
@@ -167,6 +256,8 @@ const AdminTradingPage = () => {
   const [loadingLeads, setLoadingLeads] = useState(false)
   const [reportsModalTab, setReportsModalTab] = useState<'reports' | 'workers'>('reports')
   const [reportsFilter, setReportsFilter] = useState<'all' | 'read' | 'unread'>('all')
+  const [selectedReportId, setSelectedReportId] = useState<number | null>(null)
+  const [markingReportReadId, setMarkingReportReadId] = useState<number | null>(null)
   const [pointsModal, setPointsModal] = useState<{ workerChatId: number; closerChatId: number } | null>(null)
   const [pointsAmount, setPointsAmount] = useState<string>('')
   const [pointsReason, setPointsReason] = useState<string>('')
@@ -197,6 +288,9 @@ const AdminTradingPage = () => {
     >
   >({})
   const [editingReportWorkerComment, setEditingReportWorkerComment] = useState<Record<number, string>>({})
+  const [notifyWorkerModal, setNotifyWorkerModal] = useState<{ workerChatId: number; workerName: string } | null>(null)
+  const [notifyWorkerMessage, setNotifyWorkerMessage] = useState('')
+  const [sendingWorkerNotification, setSendingWorkerNotification] = useState(false)
   const [addUserModalOpen, setAddUserModalOpen] = useState(false)
   const [selectedWorkerChatId, setSelectedWorkerChatId] = useState<number | null>(null)
   const [userChatIdInput, setUserChatIdInput] = useState('')
@@ -752,29 +846,59 @@ const AdminTradingPage = () => {
     setError(null)
     try {
       console.log('[FETCH_REPORTS] Fetching reports for closer_chat_id:', closerChatId)
-      const { data, error } = await supabase
-        .from('worker_reports')
-        .select('*')
-        .eq('closer_chat_id', closerChatId)
-        .order('created_at', { ascending: false })
+      const [{ data, error }, { data: closerWorkers, error: closerWorkersError }] = await Promise.all([
+        supabase
+          .from('worker_reports')
+          .select('*')
+          .eq('closer_chat_id', closerChatId)
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('analytics-users')
+          .select('chat_id, first_name, username, worker_comment')
+          .eq('ref_id', closerChatId)
+          .eq('role', 'worker')
+      ])
 
       if (error) {
         console.error('[FETCH_REPORTS] Error fetching reports:', error)
         throw error
       }
 
+      if (closerWorkersError) {
+        console.error('[FETCH_REPORTS] Error fetching closer workers:', closerWorkersError)
+      }
+
       console.log('[FETCH_REPORTS] Reports fetched:', data?.length || 0, 'reports')
       console.log('[FETCH_REPORTS] Sample report:', data?.[0])
       setReports(data || [])
 
-      // Завантажуємо бали та інформацію про воркерів (ім'я, username, коментар)
-      if (data && data.length > 0) {
-        const uniqueWorkerIds = [...new Set(data.map((r) => r.worker_chat_id).filter(Boolean))] as number[]
+      const reportWorkerIds = (data || []).map((r) => Number(r.worker_chat_id)).filter(Boolean)
+      const closerWorkerIds = (closerWorkers || []).map((w: any) => Number(w.chat_id)).filter(Boolean)
+      const uniqueWorkerIds = [...new Set([...reportWorkerIds, ...closerWorkerIds])] as number[]
 
-        // Бали
+      if (uniqueWorkerIds.length > 0) {
         await fetchAllWorkersPoints(closerChatId, uniqueWorkerIds)
+      } else {
+        setWorkersPointsMap({})
+      }
 
-        // Інформація про воркерів з таблиці analytics-users
+      const infoMap: Record<
+        number,
+        { chat_id: number; first_name?: string | null; username?: string | null; worker_comment?: string | null }
+      > = {}
+
+      ;(closerWorkers || []).forEach((w: any) => {
+        if (!w.chat_id) return
+        const chatIdNum = Number(w.chat_id)
+        infoMap[chatIdNum] = {
+          chat_id: chatIdNum,
+          first_name: w.first_name ?? null,
+          username: w.username ?? null,
+          worker_comment: w.worker_comment ?? null
+        }
+      })
+
+      if (uniqueWorkerIds.length > 0) {
         try {
           const { data: workersInfo, error: workersInfoError } = await supabase
             .from('analytics-users')
@@ -783,13 +907,8 @@ const AdminTradingPage = () => {
 
           if (workersInfoError) {
             console.error('[FETCH_REPORTS] Error fetching workers info for reports:', workersInfoError)
-          } else if (workersInfo && workersInfo.length > 0) {
-            const infoMap: Record<
-              number,
-              { chat_id: number; first_name?: string | null; username?: string | null; worker_comment?: string | null }
-            > = {}
-
-            workersInfo.forEach((w: any) => {
+          } else {
+            ;(workersInfo || []).forEach((w: any) => {
               if (!w.chat_id) return
               const chatIdNum = Number(w.chat_id)
               infoMap[chatIdNum] = {
@@ -799,13 +918,13 @@ const AdminTradingPage = () => {
                 worker_comment: w.worker_comment ?? null
               }
             })
-
-            setReportWorkersInfo(infoMap)
           }
         } catch (infoErr) {
           console.error('[FETCH_REPORTS] Unexpected error while fetching workers info for reports:', infoErr)
         }
       }
+
+      setReportWorkersInfo(infoMap)
     } catch (err: any) {
       console.error('Ошибка загрузки звітів', err)
       setError(err.message || 'Не удалось загрузить звіти.')
@@ -899,9 +1018,93 @@ const AdminTradingPage = () => {
   const handleViewReports = async (closerChatId: number) => {
     setReportsModalTab('reports')
     setReportsFilter('all')
+    setSelectedReportId(null)
     setWorkersPointsMap({}) // Очищаємо попередні бали
+    setNotifyWorkerModal(null)
+    setNotifyWorkerMessage('')
     setShowReportsModal(closerChatId)
     await fetchReports(closerChatId)
+  }
+
+  const openNotifyWorkerModal = (workerChatId: number, workerName: string) => {
+    setNotifyWorkerModal({ workerChatId, workerName })
+    setNotifyWorkerMessage('Привіт! Нагадую надіслати, будь ласка, звіт за сьогодні.')
+  }
+
+  const closeNotifyWorkerModal = () => {
+    if (sendingWorkerNotification) return
+    setNotifyWorkerModal(null)
+    setNotifyWorkerMessage('')
+  }
+
+  const sendWorkerReminder = async () => {
+    if (!notifyWorkerModal || !showReportsModal || sendingWorkerNotification) return
+
+    const message = notifyWorkerMessage.trim()
+    if (!message) {
+      alert('Введіть текст повідомлення')
+      return
+    }
+
+    try {
+      setSendingWorkerNotification(true)
+      setError(null)
+
+      const { error: notifyError } = await supabase.functions.invoke('closer-worker-analytics', {
+        body: {
+          type: 'notify_missing_report',
+          closer_chat_id: showReportsModal,
+          worker_chat_id: notifyWorkerModal.workerChatId,
+          message
+        }
+      })
+
+      if (notifyError) {
+        throw notifyError
+      }
+
+      alert(`Повідомлення для ${notifyWorkerModal.workerName} відправлено`)
+      setNotifyWorkerModal(null)
+      setNotifyWorkerMessage('')
+    } catch (err: any) {
+      console.error('[WORKER_REMINDER] Error sending reminder:', err)
+      setError(err.message || 'Не вдалося відправити повідомлення воркеру.')
+    } finally {
+      setSendingWorkerNotification(false)
+    }
+  }
+
+  const markReportAsRead = async (reportId: number) => {
+    if (!showReportsModal || markingReportReadId === reportId) return
+
+    try {
+      setMarkingReportReadId(reportId)
+      setError(null)
+
+      const readAt = new Date().toISOString()
+      const { error: updateError } = await supabase
+        .from('worker_reports')
+        .update({ status: 'read', read_at: readAt })
+        .eq('id', reportId)
+        .eq('closer_chat_id', showReportsModal)
+
+      if (updateError) {
+        throw updateError
+      }
+
+      setReports((prev) =>
+        prev.map((report) =>
+          report.id === reportId
+            ? { ...report, status: 'read', read_at: readAt }
+            : report
+        )
+      )
+    } catch (err: any) {
+      console.error('[REPORTS] Error marking report as read:', err)
+      setError(err.message || 'Не вдалося позначити звіт як прочитаний.')
+    } finally {
+      setMarkingReportReadId(null)
+    }
   }
 
   const fetchWorkerPoints = async (closerChatId: number, workerChatId: number) => {
@@ -2021,6 +2224,106 @@ https://t.me/+faqFs28Xnx85Mjdi`
         item.job?.toLowerCase().includes(value)
     )
   }, [payments, paymentSearch])
+
+  const filteredReports = useMemo(() => {
+    if (reportsFilter === 'all') return reports
+    return reports.filter((report) => (reportsFilter === 'read' ? report.status === 'read' : report.status === 'unread'))
+  }, [reports, reportsFilter])
+
+  const allReportWorkers = useMemo(() => {
+    return Object.values(reportWorkersInfo)
+      .map((worker) => ({
+        workerChatId: worker.chat_id,
+        workerName: `${worker.first_name || 'Воркер'}${worker.username ? ` (@${worker.username})` : ''}`
+      }))
+      .sort((a, b) => a.workerName.localeCompare(b.workerName, 'uk'))
+  }, [reportWorkersInfo])
+
+  const todayDayKey = useMemo(() => {
+    const now = new Date()
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+  }, [])
+
+  const reportsForDisplay = useMemo(() => {
+    return keepLatestTodayReportPerWorker(filteredReports, todayDayKey)
+  }, [filteredReports, todayDayKey])
+
+  const reportsGroupedByDay = useMemo(() => {
+    const grouped = new Map<
+      string,
+      {
+        dayKey: string
+        dayLabel: string
+        reports: WorkerReport[]
+        unreadCount: number
+        workersMap: Map<number, { workerChatId: number; workerName: string; total: number; unread: number }>
+        workerIds: Set<number>
+      }
+    >()
+
+    reportsForDisplay.forEach((report) => {
+      const date = new Date(report.created_at)
+      const dayKey = getDayKey(report.created_at)
+      if (!dayKey) return
+      const dayLabel = date.toLocaleDateString('uk-UA', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' })
+
+      if (!grouped.has(dayKey)) {
+        grouped.set(dayKey, {
+          dayKey,
+          dayLabel,
+          reports: [],
+          unreadCount: 0,
+          workersMap: new Map(),
+          workerIds: new Set()
+        })
+      }
+
+      const dayGroup = grouped.get(dayKey)!
+      dayGroup.reports.push(report)
+      dayGroup.workerIds.add(report.worker_chat_id)
+      if (report.status === 'unread') {
+        dayGroup.unreadCount += 1
+      }
+
+      const workerInfo = reportWorkersInfo[report.worker_chat_id]
+      const workerName = workerInfo
+        ? `${workerInfo.first_name || 'Воркер'}${workerInfo.username ? ` (@${workerInfo.username})` : ''}`
+        : `ID: ${report.worker_chat_id}`
+
+      const workerSummary = dayGroup.workersMap.get(report.worker_chat_id) || {
+        workerChatId: report.worker_chat_id,
+        workerName,
+        total: 0,
+        unread: 0
+      }
+
+      workerSummary.total += 1
+      if (report.status === 'unread') {
+        workerSummary.unread += 1
+      }
+
+      dayGroup.workersMap.set(report.worker_chat_id, workerSummary)
+    })
+
+    return Array.from(grouped.values())
+      .map((group) => ({
+        dayKey: group.dayKey,
+        dayLabel: group.dayLabel,
+        unreadCount: group.unreadCount,
+        workerIds: group.workerIds,
+        reports: group.reports.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
+        workers: Array.from(group.workersMap.values()).sort((a, b) => b.total - a.total)
+      }))
+      .sort((a, b) => b.dayKey.localeCompare(a.dayKey))
+  }, [reportsForDisplay, reportWorkersInfo])
+
+  useEffect(() => {
+    if (!showReportsModal || reportsModalTab !== 'reports') return
+
+    if (selectedReportId !== null && !reportsForDisplay.some((report) => report.id === selectedReportId)) {
+      setSelectedReportId(null)
+    }
+  }, [showReportsModal, reportsModalTab, reportsForDisplay, selectedReportId])
 
   useEffect(() => {
     if (!initialized) return
@@ -4380,6 +4683,9 @@ https://t.me/+faqFs28Xnx85Mjdi`
             setShowReportsModal(null)
             setReportsModalTab('reports')
             setReportsFilter('all')
+            setSelectedReportId(null)
+            setNotifyWorkerModal(null)
+            setNotifyWorkerMessage('')
           }}
         >
           <div className="admin-trading-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '800px', maxHeight: '90vh', overflow: 'auto' }}>
@@ -4392,6 +4698,9 @@ https://t.me/+faqFs28Xnx85Mjdi`
                   setShowReportsModal(null)
                   setReportsModalTab('reports')
                   setReportsFilter('all')
+                  setSelectedReportId(null)
+                  setNotifyWorkerModal(null)
+                  setNotifyWorkerMessage('')
                 }}
               >
                 ×
@@ -4413,8 +4722,8 @@ https://t.me/+faqFs28Xnx85Mjdi`
                         padding: '8px 16px',
                         borderRadius: '6px',
                         border: reportsModalTab === 'reports' ? '2px solid #4f46e5' : '1px solid #ddd',
-                        backgroundColor: reportsModalTab === 'reports' ? '#4f46e5' : '#f3f4f6',
-                        color: reportsModalTab === 'reports' ? '#fff' : '#111827',
+                        backgroundColor: reportsModalTab === 'reports' ? '#e0e7ff' : '#f3f4f6',
+                        color: '#000',
                         fontWeight: reportsModalTab === 'reports' ? 600 : 500,
                         cursor: 'pointer'
                       }}
@@ -4428,8 +4737,8 @@ https://t.me/+faqFs28Xnx85Mjdi`
                         padding: '8px 16px',
                         borderRadius: '6px',
                         border: reportsModalTab === 'workers' ? '2px solid #4f46e5' : '1px solid #ddd',
-                        backgroundColor: reportsModalTab === 'workers' ? '#4f46e5' : '#f3f4f6',
-                        color: reportsModalTab === 'workers' ? '#fff' : '#111827',
+                        backgroundColor: reportsModalTab === 'workers' ? '#e0e7ff' : '#f3f4f6',
+                        color: '#000',
                         fontWeight: reportsModalTab === 'workers' ? 600 : 500,
                         cursor: 'pointer'
                       }}
@@ -4440,7 +4749,7 @@ https://t.me/+faqFs28Xnx85Mjdi`
 
                   {/* Контент табів */}
                   {reportsModalTab === 'reports' ? (
-                    <>
+                    <div style={{ color: '#000' }}>
                       {/* Фільтр звітів: всі / прочитані / непрочитані */}
                       <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
                         <button
@@ -4450,8 +4759,8 @@ https://t.me/+faqFs28Xnx85Mjdi`
                             padding: '6px 12px',
                             borderRadius: '999px',
                             border: reportsFilter === 'all' ? '2px solid #4f46e5' : '1px solid #d1d5db',
-                            backgroundColor: reportsFilter === 'all' ? '#4f46e5' : '#f9fafb',
-                            color: reportsFilter === 'all' ? '#fff' : '#111827',
+                            backgroundColor: reportsFilter === 'all' ? '#eef2ff' : '#f9fafb',
+                            color: '#000',
                             fontSize: '12px',
                             cursor: 'pointer'
                           }}
@@ -4465,8 +4774,8 @@ https://t.me/+faqFs28Xnx85Mjdi`
                             padding: '6px 12px',
                             borderRadius: '999px',
                             border: reportsFilter === 'unread' ? '2px solid #f97316' : '1px solid #d1d5db',
-                            backgroundColor: reportsFilter === 'unread' ? '#f97316' : '#f9fafb',
-                            color: reportsFilter === 'unread' ? '#fff' : '#111827',
+                            backgroundColor: reportsFilter === 'unread' ? '#ffedd5' : '#f9fafb',
+                            color: '#000',
                             fontSize: '12px',
                             cursor: 'pointer'
                           }}
@@ -4480,8 +4789,8 @@ https://t.me/+faqFs28Xnx85Mjdi`
                             padding: '6px 12px',
                             borderRadius: '999px',
                             border: reportsFilter === 'read' ? '2px solid #10b981' : '1px solid #d1d5db',
-                            backgroundColor: reportsFilter === 'read' ? '#10b981' : '#f9fafb',
-                            color: reportsFilter === 'read' ? '#fff' : '#111827',
+                            backgroundColor: reportsFilter === 'read' ? '#dcfce7' : '#f9fafb',
+                            color: '#000',
                             fontSize: '12px',
                             cursor: 'pointer'
                           }}
@@ -4490,139 +4799,285 @@ https://t.me/+faqFs28Xnx85Mjdi`
                         </button>
                       </div>
 
-                      {(() => {
-                        const filteredReports =
-                          reportsFilter === 'all'
-                            ? reports
-                            : reports.filter((r) => (reportsFilter === 'read' ? r.status === 'read' : r.status === 'unread'))
+                      {reportsForDisplay.length === 0 ? (
+                        <p>Звіти за вибраним фільтром не знайдені</p>
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                          {reportsGroupedByDay.map((dayGroup) => (
+                            <div
+                              key={dayGroup.dayKey}
+                              style={{ border: '1px solid #ddd', borderRadius: '10px', padding: '12px', backgroundColor: '#fff' }}
+                            >
+                              <div
+                                style={{
+                                  display: 'flex',
+                                  justifyContent: 'space-between',
+                                  alignItems: 'center',
+                                  gap: '10px',
+                                  marginBottom: '10px'
+                                }}
+                              >
+                                <strong style={{ textTransform: 'capitalize' }}>{dayGroup.dayLabel}</strong>
+                                <span style={{ fontSize: '12px', color: '#000', fontWeight: 500 }}>
+                                  Всього: {dayGroup.reports.length}
+                                  {dayGroup.unreadCount > 0 ? ` · Непрочитані: ${dayGroup.unreadCount}` : ''}
+                                </span>
+                              </div>
 
-                        if (filteredReports.length === 0) {
-                          return <p>Звіти за вибраним фільтром не знайдені</p>
-                        }
+                              <div
+                                style={{
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  gap: '8px',
+                                  marginBottom: '12px'
+                                }}
+                              >
+                                {allReportWorkers.map((worker) => {
+                                  const hasReportToday = dayGroup.workerIds.has(worker.workerChatId)
+                                  const isToday = dayGroup.dayKey === todayDayKey
+                                  const isTodayGreen = isToday && hasReportToday
 
-                        return (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                            {filteredReports.map((report) => (
-                              <div key={report.id} style={{ border: '1px solid #ddd', borderRadius: '8px', padding: '16px' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                                  <div>
-                                    <strong>ID:</strong> {report.id}
-                                  </div>
-                                  <div style={{ fontSize: '12px', color: '#666' }}>
-                                    {new Date(report.created_at).toLocaleString('uk-UA')}
-                                  </div>
-                                </div>
-                                <div style={{ marginBottom: '8px' }}>
-                                  <strong>Тип:</strong> {report.message_type}
-                                </div>
-                                <div style={{ marginBottom: '8px' }}>
-                                  <strong>Статус:</strong> {report.status === 'read' ? '✅ Прочитано' : '📬 Непрочитано'}
-                                </div>
-                                <div style={{ marginBottom: '8px' }}>
-                                  <strong>👤 Воркер:</strong>{' '}
-                                  {reportWorkersInfo[report.worker_chat_id]?.first_name || 'Воркер'}{' '}
-                                  {reportWorkersInfo[report.worker_chat_id]?.username
-                                    ? `(@${reportWorkersInfo[report.worker_chat_id]?.username})`
-                                    : ''}
-                                  <span style={{ marginLeft: '8px', color: '#6b7280', fontSize: '12px' }}>
-                                    ID: {report.worker_chat_id}
-                                  </span>
-                                  {workersPointsMap[report.worker_chat_id] !== undefined && (
-                                    <span style={{ marginLeft: '8px', color: '#4f46e5', fontWeight: 600 }}>
-                                      · ⭐ Бали: {workersPointsMap[report.worker_chat_id]}
-                                    </span>
-                                  )}
-                                </div>
-                                {reportWorkersInfo[report.worker_chat_id]?.worker_comment && (
-                                  <div
+                                  return (
+                                    <div
+                                      key={`${dayGroup.dayKey}-${worker.workerChatId}`}
                                     style={{
-                                      marginBottom: '8px',
-                                      padding: '8px',
-                                      borderRadius: '6px',
-                                      backgroundColor: '#f9fafb',
-                                      border: '1px solid #e5e7eb',
                                       fontSize: '12px',
-                                      color: '#111827'
+                                      padding: '4px 8px',
+                                      borderRadius: '8px',
+                                      border: isTodayGreen ? '1px solid #86efac' : '1px solid #d1d5db',
+                                      backgroundColor: isTodayGreen ? '#dcfce7' : '#f9fafb',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'space-between',
+                                      gap: '10px'
                                     }}
                                   >
-                                    <strong>Коментар по воркеру:</strong>
-                                    <div style={{ marginTop: '4px', whiteSpace: 'pre-wrap' }}>
-                                      {reportWorkersInfo[report.worker_chat_id]?.worker_comment}
+                                    <span>👤 {worker.workerName}</span>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                      <strong style={{ fontSize: '14px' }}>{hasReportToday ? '✅' : '⬜'}</strong>
+                                      {!hasReportToday && isToday && (
+                                        <button
+                                          type="button"
+                                          onClick={() => openNotifyWorkerModal(worker.workerChatId, worker.workerName)}
+                                          style={{
+                                            padding: '4px 8px',
+                                            borderRadius: '6px',
+                                            border: '1px solid #f59e0b',
+                                            backgroundColor: '#fffbeb',
+                                            color: '#92400e',
+                                            fontSize: '11px',
+                                            fontWeight: 600,
+                                            cursor: 'pointer'
+                                          }}
+                                        >
+                                          Повідомити
+                                        </button>
+                                      )}
                                     </div>
                                   </div>
-                                )}
-                                <div style={{ marginTop: '12px', padding: '12px', backgroundColor: '#f5f5f5', borderRadius: '4px' }}>
-                                  <strong>Текст звіту:</strong>
-                                  <div style={{ marginTop: '8px', whiteSpace: 'pre-wrap', color: '#000' }}>
-                                    {report.message_text || <span style={{ color: '#999', fontStyle: 'italic' }}>Текст відсутній</span>}
-                                  </div>
-                                </div>
-                                {report.file_id && import.meta.env.VITE_TELEGRAM_FILE_PROXY_URL && (
-                                  <div style={{ marginTop: '12px' }}>
-                                    <img
-                                      src={`${import.meta.env.VITE_TELEGRAM_FILE_PROXY_URL}?file_id=${encodeURIComponent(
-                                        report.file_id
-                                      )}`}
-                                      alt="Скріншот звіту"
-                                      style={{ maxWidth: '100%', borderRadius: '8px', border: '1px solid #e5e7eb' }}
-                                    />
-                                  </div>
-                                )}
-                                {report.file_id && (
-                                  <div style={{ marginTop: '8px', fontSize: '12px', color: '#666' }}>
-                                    <strong>File ID:</strong> {report.file_id}
-                                  </div>
-                                )}
-
-                                {/* Кнопки для нарахування / зняття балів по цьому звіту */}
-                                <div style={{ marginTop: '12px', display: 'flex', gap: '8px' }}>
-                                    <button
-                                    type="button"
-                                    onClick={() => {
-                                      setPointsAction('add')
-                                      setPointsAmount('')
-                                      setPointsReason('')
-                                      openPointsModalForReport(report)
-                                    }}
-                                    style={{
-                                      padding: '6px 12px',
-                                      borderRadius: '6px',
-                                      border: '1px solid #10b981',
-                                      backgroundColor: '#ecfdf5',
-                                      color: '#047857',
-                                      fontSize: '12px',
-                                      cursor: 'pointer'
-                                    }}
-                                  >
-                                    ➕ Нарахувати бали
-                                  </button>
-                                    <button
-                                    type="button"
-                                    onClick={() => {
-                                      setPointsAction('remove')
-                                      setPointsAmount('')
-                                      setPointsReason('')
-                                      openPointsModalForReport(report)
-                                    }}
-                                    style={{
-                                      padding: '6px 12px',
-                                      borderRadius: '6px',
-                                      border: '1px solid #f97316',
-                                      backgroundColor: '#fff7ed',
-                                      color: '#c2410c',
-                                      fontSize: '12px',
-                                      cursor: 'pointer'
-                                    }}
-                                  >
-                                    ➖ Зняти бали
-                                  </button>
-                                </div>
+                                  )
+                                })}
                               </div>
-                            ))}
-                          </div>
-                        )
-                      })()}
-                    </>
+
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                {dayGroup.reports.map((report) => {
+                                  const workerInfo = reportWorkersInfo[report.worker_chat_id]
+                                  const workerLabel = workerInfo
+                                    ? `${workerInfo.first_name || 'Воркер'}${workerInfo.username ? ` (@${workerInfo.username})` : ''}`
+                                    : `ID: ${report.worker_chat_id}`
+                                  const isSelected = selectedReportId === report.id
+                                  const isRead = report.status === 'read'
+                                  const reportBorderColor = isRead ? '#86efac' : '#fed7aa'
+                                  const reportBackgroundColor = isRead ? '#f0fdf4' : '#fff7ed'
+
+                                  return (
+                                    <div
+                                      key={report.id}
+                                      style={{
+                                        border: isSelected
+                                          ? (isRead ? '2px solid #16a34a' : '2px solid #f59e0b')
+                                          : `1px solid ${reportBorderColor}`,
+                                        borderRadius: '8px',
+                                        backgroundColor: isSelected
+                                          ? (isRead ? '#dcfce7' : '#ffedd5')
+                                          : reportBackgroundColor
+                                      }}
+                                    >
+                                      <button
+                                        type="button"
+                                        onClick={() => setSelectedReportId((prev) => (prev === report.id ? null : report.id))}
+                                        style={{
+                                          width: '100%',
+                                          textAlign: 'left',
+                                          padding: '10px',
+                                          border: 'none',
+                                          background: 'transparent',
+                                          cursor: 'pointer'
+                                        }}
+                                      >
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
+                                          <strong style={{ fontSize: '13px' }}>{workerLabel}</strong>
+                                          <span style={{ fontSize: '12px', color: '#000' }}>
+                                            {new Date(report.created_at).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })} {isSelected ? '▲' : '▼'}
+                                          </span>
+                                        </div>
+                                        <div style={{ marginTop: '4px', fontSize: '12px', color: isRead ? '#166534' : '#9a3412' }}>
+                                          {report.status === 'read' ? '✅ Прочитано' : '📬 Непрочитано'} · {report.message_type}
+                                        </div>
+                                        <div
+                                          style={{
+                                            marginTop: '6px',
+                                            fontSize: '12px',
+                                            color: '#000',
+                                            whiteSpace: 'nowrap',
+                                            overflow: 'hidden',
+                                            textOverflow: 'ellipsis'
+                                          }}
+                                        >
+                                          {report.message_text || 'Текст відсутній'}
+                                        </div>
+                                      </button>
+
+                                      {isSelected && (
+                                        <div style={{ borderTop: isRead ? '1px solid #86efac' : '1px solid #fed7aa', padding: '12px 10px 10px' }}>
+                                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', gap: '10px' }}>
+                                            <div>
+                                              <strong>ID:</strong> {report.id}
+                                            </div>
+                                            <div style={{ fontSize: '12px', color: '#000' }}>
+                                              {new Date(report.created_at).toLocaleString('uk-UA')}
+                                            </div>
+                                          </div>
+                                          <div style={{ marginBottom: '8px' }}>
+                                            <strong>Тип:</strong> {report.message_type}
+                                          </div>
+                                          <div style={{ marginBottom: '8px' }}>
+                                            <strong>Статус:</strong> {report.status === 'read' ? '✅ Прочитано' : '📬 Непрочитано'}
+                                          </div>
+                                          <div style={{ marginBottom: '8px' }}>
+                                            <strong>👤 Воркер:</strong>{' '}
+                                            {reportWorkersInfo[report.worker_chat_id]?.first_name || 'Воркер'}{' '}
+                                            {reportWorkersInfo[report.worker_chat_id]?.username
+                                              ? `(@${reportWorkersInfo[report.worker_chat_id]?.username})`
+                                              : ''}
+                                            <span style={{ marginLeft: '8px', color: '#000', fontSize: '12px' }}>
+                                              ID: {report.worker_chat_id}
+                                            </span>
+                                            {workersPointsMap[report.worker_chat_id] !== undefined && (
+                                              <span style={{ marginLeft: '8px', color: '#000', fontWeight: 600 }}>
+                                                · ⭐ Бали: {workersPointsMap[report.worker_chat_id]}
+                                              </span>
+                                            )}
+                                          </div>
+                                          {reportWorkersInfo[report.worker_chat_id]?.worker_comment && (
+                                            <div
+                                              style={{
+                                                marginBottom: '8px',
+                                                padding: '8px',
+                                                borderRadius: '6px',
+                                                backgroundColor: '#f9fafb',
+                                                border: '1px solid #e5e7eb',
+                                                fontSize: '12px',
+                                                color: '#000'
+                                              }}
+                                            >
+                                              <strong>Коментар по воркеру:</strong>
+                                              <div style={{ marginTop: '4px', whiteSpace: 'pre-wrap' }}>
+                                                {reportWorkersInfo[report.worker_chat_id]?.worker_comment}
+                                              </div>
+                                            </div>
+                                          )}
+                                          <div style={{ marginTop: '12px', padding: '12px', backgroundColor: '#ffffff', borderRadius: '6px' }}>
+                                            <strong>Текст звіту:</strong>
+                                            <div style={{ marginTop: '8px', whiteSpace: 'pre-wrap', color: '#000' }}>
+                                              {report.message_text || <span style={{ color: '#000', fontStyle: 'italic' }}>Текст відсутній</span>}
+                                            </div>
+                                          </div>
+                                          {report.file_id && (
+                                            <div style={{ marginTop: '12px' }}>
+                                              <ReportImagePreview fileId={report.file_id} />
+                                            </div>
+                                          )}
+                                          {report.file_id && (
+                                            <div style={{ marginTop: '8px', fontSize: '12px', color: '#000' }}>
+                                              <strong>File ID:</strong> {report.file_id}
+                                            </div>
+                                          )}
+
+                                          <div style={{ marginTop: '12px', display: 'flex', gap: '8px' }}>
+                                            {report.status !== 'read' && (
+                                              <button
+                                                type="button"
+                                                onClick={() => markReportAsRead(report.id)}
+                                                disabled={markingReportReadId === report.id}
+                                                style={{
+                                                  padding: '6px 12px',
+                                                  borderRadius: '6px',
+                                                  border: '1px solid #16a34a',
+                                                  backgroundColor: '#dcfce7',
+                                                  color: '#166534',
+                                                  fontSize: '12px',
+                                                  fontWeight: 600,
+                                                  cursor: markingReportReadId === report.id ? 'not-allowed' : 'pointer'
+                                                }}
+                                              >
+                                                {markingReportReadId === report.id ? 'Оновлення...' : '✅ Прочитати звіт'}
+                                              </button>
+                                            )}
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                setPointsAction('add')
+                                                setPointsAmount('')
+                                                setPointsReason('')
+                                                openPointsModalForReport(report)
+                                              }}
+                                              style={{
+                                                padding: '6px 12px',
+                                                borderRadius: '6px',
+                                                border: '1px solid #10b981',
+                                                backgroundColor: '#ecfdf5',
+                                                color: '#000',
+                                                fontSize: '12px',
+                                                fontWeight: 600,
+                                                cursor: 'pointer'
+                                              }}
+                                            >
+                                              ➕ Нарахувати бали
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                setPointsAction('remove')
+                                                setPointsAmount('')
+                                                setPointsReason('')
+                                                openPointsModalForReport(report)
+                                              }}
+                                              style={{
+                                                padding: '6px 12px',
+                                                borderRadius: '6px',
+                                                border: '1px solid #f97316',
+                                                backgroundColor: '#fff7ed',
+                                                color: '#000',
+                                                fontSize: '12px',
+                                                fontWeight: 600,
+                                                cursor: 'pointer'
+                                              }}
+                                            >
+                                              ➖ Зняти бали
+                                            </button>
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   ) : (
                     // Таба "Воркери" – агрегуємо звіти по воркерам
                     (() => {
@@ -4837,6 +5292,77 @@ https://t.me/+faqFs28Xnx85Mjdi`
                   )}
                 </>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Модальне вікно нагадування воркеру */}
+      {notifyWorkerModal && (
+        <div className="admin-trading-modal-overlay" onClick={closeNotifyWorkerModal}>
+          <div className="admin-trading-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '560px' }}>
+            <div className="admin-trading-modal-header">
+              <h2>📩 Повідомити воркера</h2>
+              <button className="admin-trading-modal-close" type="button" onClick={closeNotifyWorkerModal}>
+                ×
+              </button>
+            </div>
+            <div className="admin-trading-modal-content" style={{ color: '#111827' }}>
+              <p style={{ marginTop: 0, marginBottom: '12px' }}>
+                Воркер: <strong>{notifyWorkerModal.workerName}</strong>
+              </p>
+              <p style={{ marginTop: 0, marginBottom: '8px', fontSize: '13px', color: '#4b5563' }}>
+                Напишіть текст, який буде відправлено воркеру в бот.
+              </p>
+              <textarea
+                value={notifyWorkerMessage}
+                onChange={(e) => setNotifyWorkerMessage(e.target.value)}
+                placeholder="Введіть текст повідомлення..."
+                style={{
+                  width: '100%',
+                  minHeight: '120px',
+                  borderRadius: '8px',
+                  border: '1px solid #d1d5db',
+                  padding: '10px',
+                  fontSize: '14px',
+                  resize: 'vertical'
+                }}
+                disabled={sendingWorkerNotification}
+              />
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '12px' }}>
+                <button
+                  type="button"
+                  onClick={closeNotifyWorkerModal}
+                  disabled={sendingWorkerNotification}
+                  style={{
+                    padding: '8px 12px',
+                    borderRadius: '8px',
+                    border: '1px solid #d1d5db',
+                    backgroundColor: '#f9fafb',
+                    color: '#374151',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Скасувати
+                </button>
+                <button
+                  type="button"
+                  onClick={sendWorkerReminder}
+                  disabled={sendingWorkerNotification || !notifyWorkerMessage.trim()}
+                  style={{
+                    padding: '8px 14px',
+                    borderRadius: '8px',
+                    border: '1px solid #4f46e5',
+                    backgroundColor: '#4f46e5',
+                    color: '#fff',
+                    fontWeight: 600,
+                    cursor: sendingWorkerNotification ? 'not-allowed' : 'pointer',
+                    opacity: sendingWorkerNotification ? 0.7 : 1
+                  }}
+                >
+                  {sendingWorkerNotification ? 'Відправка...' : 'Відправити'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
